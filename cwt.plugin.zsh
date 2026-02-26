@@ -1,4 +1,4 @@
-# cwt - Claude Worktree Manager
+# cwt - AI Worktree Manager
 # Plugin entry point for zinit, antigen, oh-my-zsh, etc.
 # shellcheck disable=all
 # ↑ This file uses zsh-only syntax that ShellCheck cannot parse

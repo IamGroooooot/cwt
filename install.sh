@@ -76,7 +76,7 @@ if grep -qF '.cwt/cwt.sh' "$ZSHRC" 2>/dev/null; then
   info "Already configured in ${DIM}${ZSHRC}${NC}"
 else
   {
-    printf '\n# cwt - Claude Worktree Manager\n'
+    printf '\n# cwt - AI Worktree Manager\n'
     printf '%s\n' "$FPATH_LINE"
     printf '%s\n' "$SOURCE_LINE"
   } >> "$ZSHRC"

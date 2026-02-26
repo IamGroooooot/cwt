@@ -14,7 +14,7 @@ teardown() {
 @test "cwt ls: no worktrees shows helpful message" {
   run_cwt_in "$REPO_DIR" "cwt ls"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No Claude worktrees yet"* ]]
+  [[ "$output" == *"No worktrees yet"* ]]
 }
 
 @test "cwt ls: unknown flag returns error" {
@@ -30,7 +30,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude list-test HEAD
+    cwt new --no-launch list-test HEAD
   " 2>/dev/null
 
   run_cwt_in "$REPO_DIR" "cwt ls"
@@ -43,10 +43,10 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude ls-from-wt HEAD
+    cwt new --no-launch ls-from-wt HEAD
   " 2>/dev/null
 
-  run_cwt_in "$REPO_DIR/.claude/worktrees/ls-from-wt" "cwt ls"
+  run_cwt_in "$REPO_DIR/.worktrees/ls-from-wt" "cwt ls"
   [ "$status" -eq 0 ]
   [[ "$output" == *"ls-from-wt"* ]]
 }
@@ -56,7 +56,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude clean-test HEAD
+    cwt new --no-launch clean-test HEAD
   " 2>/dev/null
 
   run_cwt_in "$REPO_DIR" "cwt ls"
@@ -69,11 +69,11 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude dirty-test HEAD
+    cwt new --no-launch dirty-test HEAD
   " 2>/dev/null
 
   # Make the worktree dirty
-  echo "modified" > "$REPO_DIR/.claude/worktrees/dirty-test/file.txt"
+  echo "modified" > "$REPO_DIR/.worktrees/dirty-test/file.txt"
 
   run_cwt_in "$REPO_DIR" "cwt ls"
   [ "$status" -eq 0 ]
@@ -85,7 +85,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude wt-alpha HEAD
+    cwt new --no-launch wt-alpha HEAD
   " 2>/dev/null
 
   # Separate zsh invocation so pushd from first cwt new doesn't affect us
@@ -93,7 +93,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude wt-beta HEAD
+    cwt new --no-launch wt-beta HEAD
   " 2>/dev/null
 
   run_cwt_in "$REPO_DIR" "cwt ls"

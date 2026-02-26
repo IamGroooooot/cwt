@@ -116,6 +116,59 @@ teardown() {
   [[ "$output" == *"/wt-linked"* ]]
 }
 
+@test "_cwt_require_git: default worktree dir is .worktrees" {
+  create_test_repo
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    cd '$REPO_DIR'
+    _cwt_require_git
+    echo \"worktrees_dir=\$_cwt_worktrees_dir\"
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"worktrees_dir="* ]]
+  [[ "$output" == *"/.worktrees"* ]]
+}
+
+@test "_cwt_is_valid_assistant: accepts supported assistants" {
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_is_valid_assistant claude
+    echo \"claude=\$?\"
+    _cwt_is_valid_assistant codex
+    echo \"codex=\$?\"
+    _cwt_is_valid_assistant gemini
+    echo \"gemini=\$?\"
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude=0"* ]]
+  [[ "$output" == *"codex=0"* ]]
+  [[ "$output" == *"gemini=0"* ]]
+}
+
+@test "_cwt_is_valid_assistant: rejects unknown assistant" {
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_is_valid_assistant unknown
+    echo \"status=\$?\"
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=1"* ]]
+}
+
+@test "_cwt_resolve_assistant_cmd: honors command override" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_CODEX='echo CODEX'
+    source '$CWT_SH'
+    _cwt_resolve_assistant_cmd codex
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == "echo CODEX" ]]
+}
+
 # ── Color functions with NO_COLOR ────────────────────────────────────
 
 @test "color functions strip colors when NO_COLOR=1" {

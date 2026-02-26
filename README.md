@@ -3,13 +3,13 @@
 [![CI](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml/badge.svg)](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml)
 [![ShellCheck](https://img.shields.io/badge/ShellCheck-passing-brightgreen)](https://github.com/koalaman/shellcheck)
 
-**Claude Worktree Manager** — Create isolated git worktrees and launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in one command.
+**AI Worktree Manager** — Create isolated git worktrees and launch your coding assistant (`claude`, `codex`, `gemini`) in one command.
 
 ```
 cwt new fix-auth main
 ```
 
-Creates a worktree, checks out a new branch, copies config files, and drops you into a Claude Code session — all in seconds.
+Creates a worktree, checks out a new branch, copies config files, and drops you into an assistant session — all in seconds.
 
 ## Install
 
@@ -61,7 +61,7 @@ The installer automatically sets up zsh tab completion. After installing, you ge
 ```
 cwt <TAB>        → new, ls, cd, rm, update (with descriptions)
 cwt new <TAB>    → suggest worktree name
-cwt new --<TAB>  → --help, --no-claude
+cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --no-launch
 cwt cd <TAB>     → list existing worktree names
 cwt rm <TAB>     → list existing worktree names
 cwt rm --<TAB>   → --help, --force/-f
@@ -81,7 +81,7 @@ autoload -Uz compinit && compinit
 cwt [global-options] <command> [options]
 
 Commands:
-  new      Create a new worktree and launch Claude Code
+  new      Create a new worktree and launch an assistant
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
@@ -93,16 +93,26 @@ Global Options:
   -v, --version    Show version
 ```
 
+## Breaking changes
+
+- Default worktree directory is now `<git-root>/.worktrees` (was `.claude/worktrees`).
+- `--no-launch` replaces `--no-claude`.
+- `CWT_AUTO_LAUNCH` replaces `CWT_AUTO_CLAUDE`.
+- `cwt new/cd` now support `--assistant <claude|codex|gemini>` and shortcuts `--claude`, `--codex`, `--gemini`.
+
 ### Create a worktree
 
 ```sh
 cwt new fix-auth                # pick base branch interactively
 cwt new fix-auth main           # base off main
 cwt new fix-auth main feat/x    # explicit branch name
-cwt new --no-claude my-task     # skip Claude Code launch
+cwt new fix-auth --assistant codex   # launch codex after create
+cwt new fix-auth --gemini            # launch gemini after create
+cwt new --no-launch my-task          # skip assistant launch
 ```
 
 If [fzf](https://github.com/junegunn/fzf) is installed, branch selection becomes interactive. Otherwise, a numbered list is shown.
+When the default `.worktrees` directory is used, `cwt new` automatically ensures `.worktrees/` is present in `.gitignore`.
 
 ### List worktrees
 
@@ -122,7 +132,8 @@ cwt ls 2>/dev/null | grep dirty
 
 ```sh
 cwt cd fix-auth            # enter worktree directory
-cwt cd fix-auth --claude   # enter and launch Claude Code
+cwt cd fix-auth --assistant codex
+cwt cd fix-auth --gemini
 cwt cd                     # interactive selection
 ```
 
@@ -202,25 +213,36 @@ Override the path with `CWT_CONFIG=/path/to/config`.
 # Skip the interactive base-branch prompt and always use this branch
 CWT_DEFAULT_BASE_BRANCH=main
 
-# Set to "false" to skip launching Claude Code by default (same as --no-claude)
-CWT_AUTO_CLAUDE=false
+# Default assistant used by cwt new/cd when launch is requested
+CWT_DEFAULT_ASSISTANT=claude
 
-# Custom worktree directory (default: <git-root>/.claude/worktrees)
+# Set to "false" to skip launching after cwt new by default (same as --no-launch)
+CWT_AUTO_LAUNCH=false
+
+# Custom worktree directory (default: <git-root>/.worktrees)
 CWT_WORKTREE_DIR=
+
+# Optional command overrides
+CWT_CMD_CLAUDE=claude
+CWT_CMD_CODEX=codex
+CWT_CMD_GEMINI=gemini
 ```
 
 All options are optional. Unset values keep the default behavior.
 
 ## How it works
 
-Worktrees are created under `<project>/.claude/worktrees/<name>`. Each gets a new branch (`wt/<name>-<rand>` by default) and optionally copies files listed in `.worktreeinclude`. After setup, `claude` is launched in the worktree directory.
+Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branch (`wt/<name>-<rand>` by default) and optionally copies files listed in `.worktreeinclude`. After setup, the selected assistant command is launched in the worktree directory.
 
 ## Requirements
 
 - **zsh** (macOS default)
 - **git** 2.15+
 - **fzf** *(optional, for interactive selection)*
-- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** *(optional, auto-launched unless `--no-claude`)*
+- **Any supported assistant CLI** *(optional, auto-launched unless `--no-launch`)*
+  - `claude`
+  - `codex`
+  - `gemini` or `gemini-cli`
 
 ## Uninstall
 

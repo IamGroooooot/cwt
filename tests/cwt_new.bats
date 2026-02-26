@@ -35,17 +35,32 @@ teardown() {
   [[ "$output" == *"cwt new --help"* ]]
 }
 
-@test "cwt new: creates worktree with --no-claude" {
+@test "cwt new: creates worktree with --no-launch" {
   run zsh -c "
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude test-wt HEAD
+    cwt new --no-launch test-wt HEAD
   "
   [ "$status" -eq 0 ]
   [[ "$output" == *"Worktree created"* ]] || [[ "$output" == *"Worktree ready"* ]]
   # Verify the worktree directory exists
-  [ -d "$REPO_DIR/.claude/worktrees/test-wt" ]
+  [ -d "$REPO_DIR/.worktrees/test-wt" ]
+}
+
+@test "cwt new: adds .worktrees/ to .gitignore when missing" {
+  rm -f "$REPO_DIR/.gitignore"
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch ignore-check HEAD
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_DIR/.gitignore" ]
+  run grep -E '^[[:space:]]*\.worktrees/?[[:space:]]*$' "$REPO_DIR/.gitignore"
+  [ "$status" -eq 0 ]
 }
 
 @test "cwt new: duplicate name returns error" {
@@ -54,7 +69,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude dup-test HEAD
+    cwt new --no-launch dup-test HEAD
   " 2>/dev/null
 
   # Try to create again with same name
@@ -62,22 +77,70 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude dup-test HEAD
+    cwt new --no-launch dup-test HEAD
   "
   [ "$status" -eq 1 ]
   [[ "$output" == *"already exists"* ]]
 }
 
-@test "cwt new: --no-claude flag skips claude launch" {
+@test "cwt new: --no-launch flag skips assistant launch" {
   run zsh -c "
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude skip-claude HEAD
+    cwt new --no-launch skip-claude HEAD
   "
   [ "$status" -eq 0 ]
-  # Should show Ready message instead of launching claude
+  # Should show Ready message instead of launching an assistant
   [[ "$output" == *"Ready"* ]] || [[ "$output" == *"Worktree ready"* ]]
+}
+
+@test "cwt new: launches selected assistant with --assistant" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new launch-codex HEAD --assistant codex
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Launching codex"* ]]
+  [[ "$output" == *"CODEX_OK"* ]]
+}
+
+@test "cwt new: assistant launch failure returns non-zero" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_CODEX=false
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new launch-fail HEAD --assistant codex
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Assistant 'codex' exited with code"* ]]
+}
+
+@test "cwt new: missing assistant command returns error" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_GEMINI='definitely-missing-command'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new missing-cmd HEAD --assistant gemini
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Selected assistant 'gemini' is not available"* ]]
+}
+
+@test "cwt new: unknown assistant returns error" {
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new unknown-assistant HEAD --assistant no-such-assistant
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown assistant"* ]]
 }
 
 @test "cwt new: creates a branch prefixed with wt/" {
@@ -85,7 +148,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude branch-test HEAD
+    cwt new --no-launch branch-test HEAD
   "
   [ "$status" -eq 0 ]
   # Check that a wt/ branch was created
@@ -98,7 +161,7 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude explicit-wt HEAD feat/my-branch
+    cwt new --no-launch explicit-wt HEAD feat/my-branch
   "
   [ "$status" -eq 0 ]
   # The branch should exist
@@ -111,10 +174,10 @@ teardown() {
     export NO_COLOR=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    cwt new --no-claude no-tty-base < /dev/null
+    cwt new --no-launch no-tty-base < /dev/null
   "
   [ "$status" -eq 0 ]
-  [ -d "$REPO_DIR/.claude/worktrees/no-tty-base" ]
+  [ -d "$REPO_DIR/.worktrees/no-tty-base" ]
 }
 
 @test "cwt new --help: shows help" {
@@ -125,5 +188,6 @@ teardown() {
   "
   [ "$status" -eq 0 ]
   [[ "$output" == *"USAGE"* ]]
-  [[ "$output" == *"--no-claude"* ]]
+  [[ "$output" == *"--assistant"* ]]
+  [[ "$output" == *"--no-launch"* ]]
 }

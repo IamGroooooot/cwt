@@ -46,7 +46,7 @@ create_test_repo() {
 
 # Run a cwt function inside zsh.
 # Usage: run_cwt <function> [args...]
-# Example: run_cwt cwt new --no-claude my-wt HEAD
+# Example: run_cwt cwt new --no-launch my-wt HEAD
 #
 # This sources cwt.sh in a zsh subshell and calls the given function.
 # stdout+stderr are captured, and the exit code is returned.

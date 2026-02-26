@@ -1,17 +1,34 @@
 #compdef cwt
 # ─────────────────────────────────────────────────────────────────────────────
-# Zsh completion for cwt - Claude Worktree Manager
+# Zsh completion for cwt - AI Worktree Manager
 # ─────────────────────────────────────────────────────────────────────────────
 
-# List existing worktree names from .claude/worktrees/*/
+# Resolve the shared repository root (works in linked worktrees too).
+(( $+functions[_cwt_repo_root] )) || _cwt_repo_root() {
+  local current_root git_common_dir
+  current_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+
+  git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+  if [[ -z "$git_common_dir" ]]; then
+    echo "${current_root:A}"
+    return
+  fi
+
+  if [[ "$git_common_dir" != /* ]]; then
+    git_common_dir="${current_root}/${git_common_dir}"
+  fi
+  echo "${git_common_dir:A:h}"
+}
+
+# List existing worktree names from .worktrees/*/
 (( $+functions[_cwt_worktree_names] )) || _cwt_worktree_names() {
   local git_root wt_dir
-  git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+  git_root=$(_cwt_repo_root) || return
 
   if [[ -n "$CWT_WORKTREE_DIR" ]]; then
     wt_dir="$CWT_WORKTREE_DIR"
   else
-    wt_dir="${git_root}/.claude/worktrees"
+    wt_dir="${git_root}/.worktrees"
   fi
 
   [[ -d "$wt_dir" ]] || return
@@ -27,17 +44,25 @@
 # List git branch names
 (( $+functions[_cwt_branches] )) || _cwt_branches() {
   local git_root
-  git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+  git_root=$(_cwt_repo_root) || return
 
   local -a branches
   branches=( ${(f)"$(git -C "$git_root" branch --format='%(refname:short)' 2>/dev/null)"} )
   (( ${#branches} )) && compadd -X "branches" -a branches
 }
 
+(( $+functions[_cwt_assistants] )) || _cwt_assistants() {
+  compadd -X "assistants" claude codex gemini
+}
+
 _cwt_new() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
-    '--no-claude[Skip launching Claude Code]' \
+    '--assistant[Assistant to launch]:assistant:_cwt_assistants' \
+    '--claude[Shortcut for --assistant claude]' \
+    '--codex[Shortcut for --assistant codex]' \
+    '--gemini[Shortcut for --assistant gemini]' \
+    '--no-launch[Skip assistant launch after creation]' \
     ':name:' \
     ':base-branch:_cwt_branches' \
     ':branch-name:'
@@ -51,7 +76,10 @@ _cwt_ls() {
 _cwt_cd() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
-    '--claude[Launch Claude Code after entering]' \
+    '--assistant[Assistant to launch]:assistant:_cwt_assistants' \
+    '--claude[Shortcut for --assistant claude]' \
+    '--codex[Shortcut for --assistant codex]' \
+    '--gemini[Shortcut for --assistant gemini]' \
     ':name:_cwt_worktree_names'
 }
 
@@ -70,7 +98,7 @@ _cwt_update() {
 _cwt() {
   local -a commands
   commands=(
-    'new:Create a new worktree and launch Claude Code'
+    'new:Create a new worktree and launch an assistant'
     'ls:List all worktrees with status'
     'cd:Enter an existing worktree'
     'rm:Remove a worktree'

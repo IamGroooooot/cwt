@@ -2,8 +2,8 @@
 # shellcheck disable=SC1009,SC1036,SC1058,SC1072,SC1073
 # ↑ zsh glob qualifiers like (N) and ${var:t} can't be parsed by ShellCheck
 # ─────────────────────────────────────────────────────────────────────────────
-# cwt - Claude Worktree Manager
-# Manage git worktrees for parallel Claude Code sessions.
+# cwt - AI Worktree Manager
+# Manage git worktrees for parallel AI coding sessions.
 #
 # Install:
 #   source "$HOME/.cwt/cwt.sh"
@@ -105,7 +105,130 @@ _cwt_require_git() {
     _cwt_git_root="${git_common_dir:h}"
   fi
 
-  _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.claude/worktrees}"
+  _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.worktrees}"
+}
+
+_cwt_default_assistant() {
+  echo "${${CWT_DEFAULT_ASSISTANT:-claude}:l}"
+}
+
+_cwt_is_valid_assistant() {
+  case "${1:l}" in
+    claude|codex|gemini) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_cwt_assistant_env_var_name() {
+  case "${1:l}" in
+    claude) echo "CWT_CMD_CLAUDE" ;;
+    codex) echo "CWT_CMD_CODEX" ;;
+    gemini) echo "CWT_CMD_GEMINI" ;;
+  esac
+}
+
+_cwt_assistant_default_candidates() {
+  case "${1:l}" in
+    claude) echo "claude" ;;
+    codex) echo "codex" ;;
+    gemini) echo "gemini gemini-cli" ;;
+  esac
+}
+
+_cwt_command_exists() {
+  local command_line="$1"
+  local -a parts
+  parts=(${(z)command_line})
+  [[ ${#parts[@]} -gt 0 ]] || return 1
+  command -v "${parts[1]}" >/dev/null 2>&1
+}
+
+_cwt_resolve_assistant_cmd() {
+  local assistant="${1:l}"
+  local env_var="$(_cwt_assistant_env_var_name "$assistant")"
+  local custom_cmd="${(P)env_var}"
+  local -a tried=()
+
+  if [[ -n "$custom_cmd" ]]; then
+    tried+=("$custom_cmd")
+    if _cwt_command_exists "$custom_cmd"; then
+      echo "$custom_cmd"
+      return 0
+    fi
+    _cwt_log_error "Selected assistant '$assistant' is not available."
+    _cwt_log_item "Tried: ${tried[*]}"
+    _cwt_log_item "Install it or set ${env_var} to a valid command."
+    return 1
+  fi
+
+  local -a candidates=(${=(_cwt_assistant_default_candidates "$assistant")})
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    tried+=("$candidate")
+    if _cwt_command_exists "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  _cwt_log_error "Selected assistant '$assistant' is not available."
+  _cwt_log_item "Tried: ${tried[*]}"
+  _cwt_log_item "Install it or set ${env_var} to a valid command."
+  return 1
+}
+
+_cwt_launch_assistant() {
+  local assistant="${1:l}"
+  local command_line
+  command_line=$(_cwt_resolve_assistant_cmd "$assistant") || return 1
+
+  local -a command_parts
+  command_parts=(${(z)command_line})
+
+  _cwt_log_info "Launching $(_cwt_bold "$assistant")..."
+  "${command_parts[@]}"
+  local launch_status=$?
+  if [[ $launch_status -ne 0 ]]; then
+    _cwt_log_error "Assistant '$assistant' exited with code $launch_status."
+    return $launch_status
+  fi
+}
+
+_cwt_ensure_default_worktree_ignored() {
+  [[ -n "$CWT_WORKTREE_DIR" ]] && return 0
+
+  local gitignore_path="${_cwt_git_root}/.gitignore"
+  local ignore_entry=".worktrees/"
+
+  if [[ -f "$gitignore_path" ]] && grep -Eq '^[[:space:]]*\.worktrees/?[[:space:]]*$' "$gitignore_path"; then
+    return 0
+  fi
+
+  if [[ ! -f "$gitignore_path" ]]; then
+    printf "%s\n" "$ignore_entry" > "$gitignore_path" || {
+      _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
+      return 1
+    }
+    _cwt_log_info "Added $(_cwt_bold "$ignore_entry") to .gitignore."
+    return 0
+  fi
+
+  if [[ -s "$gitignore_path" ]]; then
+    local last_char
+    last_char=$(tail -c 1 "$gitignore_path" 2>/dev/null || true)
+    if [[ "$last_char" != $'\n' ]]; then
+      printf '\n' >> "$gitignore_path" || {
+        _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
+        return 1
+      }
+    fi
+  fi
+
+  printf "%s\n" "$ignore_entry" >> "$gitignore_path" || {
+    _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
+    return 1
+  }
+  _cwt_log_info "Added $(_cwt_bold "$ignore_entry") to .gitignore."
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -113,15 +236,17 @@ _cwt_require_git() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 _cwt_new() {
-  local no_claude=0
-  [[ "$CWT_AUTO_CLAUDE" == "false" ]] && no_claude=1
+  local no_launch=0
+  [[ "${CWT_AUTO_LAUNCH:-true}" == "false" ]] && no_launch=1
+  local assistant="$(_cwt_default_assistant)"
   local positional=()
 
-  for arg in "$@"; do
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
     case "$arg" in
       --help|-h)
         cat <<EOF
-$(_cwt_bold 'cwt new') - Create a Claude worktree
+$(_cwt_bold 'cwt new') - Create a worktree
 
 $(_cwt_bold 'USAGE')
   cwt new [options] [name] [base-branch] [branch-name]
@@ -133,18 +258,42 @@ $(_cwt_bold 'ARGUMENTS')
 
 $(_cwt_bold 'OPTIONS')
   -h, --help       Show this help
-  --no-claude      Skip launching Claude Code after creation
+  --assistant      Assistant to launch ($(_cwt_bold 'claude|codex|gemini'))
+  --claude         Shortcut for --assistant claude
+  --codex          Shortcut for --assistant codex
+  --gemini         Shortcut for --assistant gemini
+  --no-launch      Skip assistant launch after creation
 
 $(_cwt_bold 'EXAMPLES')
-  cwt new fix-auth                    # Create worktree, pick base interactively
-  cwt new fix-auth main               # Base off main
-  cwt new fix-auth main feat/auth     # Explicit branch name
-  cwt new --no-claude my-task         # Create without launching Claude
+  cwt new fix-auth                              # Create worktree, pick base interactively
+  cwt new fix-auth main                         # Base off main
+  cwt new fix-auth main feat/auth               # Explicit branch name
+  cwt new fix-auth --assistant codex            # Launch codex in the new worktree
+  cwt new fix-auth --gemini                     # Launch gemini in the new worktree
+  cwt new fix-auth --no-launch                  # Create without launching an assistant
 EOF
         return 0
         ;;
-      --no-claude)
-        no_claude=1
+      --no-launch)
+        no_launch=1
+        shift
+        ;;
+      --assistant)
+        if [[ $# -lt 2 ]]; then
+          _cwt_log_error "Missing value for $(_cwt_bold '--assistant')."
+          echo "  Use one of: claude, codex, gemini" >&2
+          return 1
+        fi
+        assistant="${2:l}"
+        shift 2
+        ;;
+      --assistant=*)
+        assistant="${${arg#--assistant=}:l}"
+        shift
+        ;;
+      --claude|--codex|--gemini)
+        assistant="${arg#--}"
+        shift
         ;;
       -*)
         _cwt_log_error "Unknown option for cwt new: $(_cwt_bold "$arg")"
@@ -152,17 +301,24 @@ EOF
         return 1
         ;;
       *)
-        positional+=("$arg")
+        positional+=("$1")
+        shift
         ;;
     esac
   done
+
+  if ! _cwt_is_valid_assistant "$assistant"; then
+    _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
+    _cwt_log_info "Use one of: claude codex gemini"
+    return 1
+  fi
 
   # 1) Worktree name
   local name="${positional[1]}"
   if [[ -z "$name" ]]; then
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--no-claude]" >&2
+      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--no-launch]" >&2
       return 1
     fi
     echo -n "$(_cwt_cyan '?') Worktree name: " >&2
@@ -175,6 +331,8 @@ EOF
     _cwt_log_error "Worktree already exists: $(_cwt_bold "$name")"
     return 1
   fi
+
+  _cwt_ensure_default_worktree_ignored || return 1
 
   # 2) Base branch selection
   local base_branch="${positional[2]}"
@@ -203,26 +361,24 @@ EOF
         fi
       fi
 
-      if [[ -n "$base_branch" ]]; then
-        :
-      else
-      echo "" >&2
-      _cwt_log_info "Select base branch:"
-      local i=1
-      for b in "${branches[@]}"; do
-        echo "   $(_cwt_dim "$i)") $b" >&2
-        ((i++))
-      done
-      echo -n "$(_cwt_cyan '?') Choice $(_cwt_dim '(default: 1=HEAD)'): " >&2
-      read num
-      if [[ -z "$num" ]]; then
-        base_branch="HEAD"
-      elif [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#branches[@]} )); then
-        base_branch="${branches[$num]}"
-      else
-        _cwt_log_error "Invalid selection."
-        return 1
-      fi
+      if [[ -z "$base_branch" ]]; then
+        echo "" >&2
+        _cwt_log_info "Select base branch:"
+        local i=1
+        for b in "${branches[@]}"; do
+          echo "   $(_cwt_dim "$i)") $b" >&2
+          ((i++))
+        done
+        echo -n "$(_cwt_cyan '?') Choice $(_cwt_dim '(default: 1=HEAD)'): " >&2
+        read num
+        if [[ -z "$num" ]]; then
+          base_branch="HEAD"
+        elif [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#branches[@]} )); then
+          base_branch="${branches[$num]}"
+        else
+          _cwt_log_error "Invalid selection."
+          return 1
+        fi
       fi
     fi
   fi
@@ -288,11 +444,10 @@ EOF
     echo ""
   } >&2
 
-  # 7) Enter worktree and optionally launch Claude
+  # 7) Enter worktree and optionally launch an assistant
   pushd "$worktree_path" > /dev/null
-  if [[ $no_claude -eq 0 ]]; then
-    _cwt_log_info "Launching Claude Code..."
-    claude
+  if [[ $no_launch -eq 0 ]]; then
+    _cwt_launch_assistant "$assistant" || return $?
   else
     _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
   fi
@@ -308,7 +463,7 @@ _cwt_ls() {
     case "$arg" in
       --help|-h)
         cat <<EOF
-$(_cwt_bold 'cwt ls') - List Claude worktrees
+$(_cwt_bold 'cwt ls') - List worktrees
 
 $(_cwt_bold 'USAGE')
   cwt ls [options]
@@ -331,7 +486,7 @@ EOF
   done
 
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
-    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -368,13 +523,13 @@ EOF
   done
 
   if [[ $count -eq 0 ]]; then
-    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
   # Header decoration goes to stderr
   echo "" >&2
-  echo "  $(_cwt_bold "$(_cwt_cyan 'Claude Worktrees')") $(_cwt_dim "($_cwt_git_root)")" >&2
+  echo "  $(_cwt_bold "$(_cwt_cyan 'Worktrees')") $(_cwt_dim "($_cwt_git_root)")" >&2
   echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')" >&2
   echo "" >&2
 
@@ -410,7 +565,7 @@ _cwt_rm() {
     case "$arg" in
       --help|-h)
         cat <<EOF
-$(_cwt_bold 'cwt rm') - Remove a Claude worktree
+$(_cwt_bold 'cwt rm') - Remove a worktree
 
 $(_cwt_bold 'USAGE')
   cwt rm [options] [name]
@@ -447,10 +602,10 @@ EOF
 
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
     if [[ -n "$selected" ]]; then
-      _cwt_log_error "No Claude worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
       return 1
     fi
-    _cwt_log_info "No Claude worktrees to remove."
+    _cwt_log_info "No worktrees to remove."
     return 0
   fi
 
@@ -462,7 +617,7 @@ EOF
 
   if [[ ${#worktree_names[@]} -eq 0 ]]; then
     if [[ -n "$selected" ]]; then
-      _cwt_log_error "No Claude worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
       return 1
     fi
     _cwt_log_info "No worktrees to remove."
@@ -613,10 +768,12 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 
 _cwt_cd() {
-  local launch_claude=0
+  local launch_assistant=0
+  local assistant="$(_cwt_default_assistant)"
   local positional=()
 
-  for arg in "$@"; do
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
     case "$arg" in
       --help|-h)
         cat <<EOF
@@ -630,16 +787,37 @@ $(_cwt_bold 'ARGUMENTS')
 
 $(_cwt_bold 'OPTIONS')
   -h, --help       Show this help
-  --claude         Also launch Claude Code
+  --assistant      Assistant to launch ($(_cwt_bold 'claude|codex|gemini'))
+  --claude         Shortcut for --assistant claude
+  --codex          Shortcut for --assistant codex
+  --gemini         Shortcut for --assistant gemini
 
 $(_cwt_bold 'EXAMPLES')
-  cwt cd fix-auth            # Enter worktree directory
-  cwt cd fix-auth --claude   # Enter and launch Claude
-  cwt cd                     # Main repo: interactive selection, Worktree: return to main
+  cwt cd fix-auth                       # Enter worktree directory
+  cwt cd fix-auth --assistant codex     # Enter and launch codex
+  cwt cd fix-auth --gemini              # Enter and launch gemini
+  cwt cd                                # Main repo: interactive selection, worktree: return to main
 EOF
         return 0 ;;
-      --claude)
-        launch_claude=1
+      --assistant)
+        if [[ $# -lt 2 ]]; then
+          _cwt_log_error "Missing value for $(_cwt_bold '--assistant')."
+          echo "  Use one of: claude, codex, gemini" >&2
+          return 1
+        fi
+        assistant="${2:l}"
+        launch_assistant=1
+        shift 2
+        ;;
+      --assistant=*)
+        assistant="${${arg#--assistant=}:l}"
+        launch_assistant=1
+        shift
+        ;;
+      --claude|--codex|--gemini)
+        assistant="${arg#--}"
+        launch_assistant=1
+        shift
         ;;
       -*)
         _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
@@ -647,10 +825,17 @@ EOF
         return 1
         ;;
       *)
-        positional+=("$arg")
+        positional+=("$1")
+        shift
         ;;
     esac
   done
+
+  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_assistant "$assistant"; then
+    _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
+    _cwt_log_info "Use one of: claude codex gemini"
+    return 1
+  fi
 
   local selected="${positional[1]}"
   local main_root="${_cwt_git_root:A}"
@@ -679,16 +864,15 @@ EOF
       fi
     fi
 
-    if [[ $launch_claude -eq 1 ]]; then
-      _cwt_log_info "Launching Claude Code..."
-      claude
+    if [[ $launch_assistant -eq 1 ]]; then
+      _cwt_launch_assistant "$assistant" || return $?
     fi
 
     return 0
   fi
 
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
-    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -699,7 +883,7 @@ EOF
   done
 
   if [[ ${#names[@]} -eq 0 ]]; then
-    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -714,7 +898,7 @@ EOF
   else
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt cd <name> [--claude]" >&2
+      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini]" >&2
       return 1
     fi
     local fzf_status=1
@@ -754,9 +938,8 @@ EOF
   pushd "$wt_path" > /dev/null
   _cwt_log_success "Entered $(_cwt_bold "$selected")"
 
-  if [[ $launch_claude -eq 1 ]]; then
-    _cwt_log_info "Launching Claude Code..."
-    claude
+  if [[ $launch_assistant -eq 1 ]]; then
+    _cwt_launch_assistant "$assistant" || return $?
   fi
 
   _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
@@ -836,13 +1019,13 @@ cwt() {
         ;;
       -h|--help)
         cat <<EOF
-$(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - Claude Worktree Manager
+$(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - AI Worktree Manager
 
 $(_cwt_bold 'USAGE')
   cwt [global-options] <command> [options]
 
 $(_cwt_bold 'COMMANDS')
-  new      Create a new worktree and launch Claude Code
+  new      Create a new worktree and launch an assistant
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
@@ -854,20 +1037,22 @@ $(_cwt_bold 'GLOBAL OPTIONS')
   -v, --version    Show version
 
 $(_cwt_bold 'EXAMPLES')
-  cwt new fix-auth           # Create worktree "fix-auth"
-  cwt new fix-auth main      # Create based on main branch
-  cwt new --no-claude task   # Create without launching Claude
-  cwt ls                     # List all worktrees
-  cwt cd fix-auth            # Enter existing worktree
-  cwt cd fix-auth --claude   # Enter and launch Claude
-  cwt rm fix-auth            # Remove worktree "fix-auth"
-  cwt rm -f fix-auth         # Force remove (skip confirmation)
-  cwt update                 # Update cwt to latest version
-  cwt -q new fix-auth main   # Create worktree quietly
+  cwt new fix-auth                          # Create worktree "fix-auth"
+  cwt new fix-auth main                     # Create based on main branch
+  cwt new fix-auth --assistant codex        # Launch codex after create
+  cwt new fix-auth --no-launch              # Create without launch
+  cwt ls                                    # List all worktrees
+  cwt cd fix-auth                           # Enter existing worktree
+  cwt cd fix-auth --assistant gemini        # Enter and launch gemini
+  cwt rm fix-auth                           # Remove worktree "fix-auth"
+  cwt rm -f fix-auth                        # Force remove (skip confirmation)
+  cwt update                                # Update cwt to latest version
+  cwt -q new fix-auth main                  # Create worktree quietly
 
 $(_cwt_bold 'DEPENDENCIES')
   Required: git, zsh
   Optional: fzf $(_cwt_dim '(interactive branch/worktree selection)')
+            claude/codex/gemini $(_cwt_dim '(assistant launch)')
 EOF
         return 0
         ;;
@@ -888,13 +1073,13 @@ EOF
   case "$subcmd" in
     "")
       cat <<EOF
-$(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - Claude Worktree Manager
+$(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - AI Worktree Manager
 
 $(_cwt_bold 'USAGE')
   cwt [global-options] <command> [options]
 
 $(_cwt_bold 'COMMANDS')
-  new      Create a new worktree and launch Claude Code
+  new      Create a new worktree and launch an assistant
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
