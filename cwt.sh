@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.1"
+CWT_VERSION="0.2.2"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1151,6 +1151,34 @@ EOF
 # Subcommand: cwt update
 # ═══════════════════════════════════════════════════════════════════════════
 
+_cwt_log_update_result() {
+  local old_version="$1"
+  local new_version="$2"
+  local old_commit="$3"
+  local new_commit="$4"
+
+  if [[ -n "$old_commit" && -n "$new_commit" ]]; then
+    if [[ "$old_commit" == "$new_commit" ]]; then
+      _cwt_log_success "Already up to date (v${new_version})."
+      return
+    fi
+
+    if [[ "$old_version" == "$new_version" ]]; then
+      _cwt_log_success "Updated cwt to latest commit (v${new_version})."
+      return
+    fi
+
+    _cwt_log_success "Updated cwt: $old_version -> $new_version"
+    return
+  fi
+
+  if [[ "$old_version" == "$new_version" ]]; then
+    _cwt_log_success "Already up to date (v${new_version})."
+  else
+    _cwt_log_success "Updated cwt: $old_version -> $new_version"
+  fi
+}
+
 _cwt_update() {
   for arg in "$@"; do
     case "$arg" in
@@ -1166,7 +1194,7 @@ $(_cwt_bold 'OPTIONS')
 
 $(_cwt_bold 'DESCRIPTION')
   Pulls the latest version from git and re-sources cwt.sh.
-  Requires cwt to be installed via git clone.
+  Requires cwt to be installed from a git checkout.
 EOF
         return 0
         ;;
@@ -1179,30 +1207,29 @@ EOF
   done
 
   local cwt_dir="${CWT_DIR:-$HOME/.cwt}"
+  local cwt_file="$cwt_dir/cwt.sh"
   if ! git -C "$cwt_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     _cwt_log_error "cwt update requires a git-based install. Cannot update."
     return 1
   fi
 
+  if [[ ! -f "$cwt_file" ]]; then
+    _cwt_log_error "Update failed. Missing cwt.sh in $(_cwt_bold "$cwt_dir")."
+    return 1
+  fi
+
   local old_version="$CWT_VERSION"
-  local old_commit new_commit
+  local old_commit new_commit pull_output
   old_commit=$(git -C "$cwt_dir" rev-parse --verify HEAD 2>/dev/null || true)
   _cwt_log_info "Checking for updates..."
 
-  local pull_output
-  pull_output=$(git -C "$cwt_dir" pull --ff-only 2>&1)
-  if [[ $? -ne 0 ]]; then
+  if ! pull_output=$(git -C "$cwt_dir" pull --ff-only 2>&1); then
     _cwt_log_error "Update failed. See git output below."
     _cwt_log_item "$pull_output"
     return 1
   fi
 
   # Re-source to get new version
-  local cwt_file="$cwt_dir/cwt.sh"
-  if [[ ! -f "$cwt_file" ]]; then
-    _cwt_log_error "Update failed. Missing cwt.sh in $(_cwt_bold "$cwt_dir")."
-    return 1
-  fi
   if ! source "$cwt_file"; then
     _cwt_log_error "Update applied, but failed to reload cwt.sh."
     _cwt_log_item "Run: source \"$cwt_file\""
@@ -1210,19 +1237,7 @@ EOF
   fi
   new_commit=$(git -C "$cwt_dir" rev-parse --verify HEAD 2>/dev/null || true)
 
-  if [[ -n "$old_commit" && -n "$new_commit" ]]; then
-    if [[ "$old_commit" == "$new_commit" ]]; then
-      _cwt_log_success "Already up to date (v${CWT_VERSION})."
-    elif [[ "$old_version" == "$CWT_VERSION" ]]; then
-      _cwt_log_success "Updated cwt to latest commit (v${CWT_VERSION})."
-    else
-      _cwt_log_success "Updated cwt: $old_version -> $CWT_VERSION"
-    fi
-  elif [[ "$old_version" == "$CWT_VERSION" ]]; then
-    _cwt_log_success "Already up to date (v${CWT_VERSION})."
-  else
-    _cwt_log_success "Updated cwt: $old_version -> $CWT_VERSION"
-  fi
+  _cwt_log_update_result "$old_version" "$CWT_VERSION" "$old_commit" "$new_commit"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
