@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.0"
+CWT_VERSION="0.2.1"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1185,6 +1185,8 @@ EOF
   fi
 
   local old_version="$CWT_VERSION"
+  local old_commit new_commit
+  old_commit=$(git -C "$cwt_dir" rev-parse --verify HEAD 2>/dev/null || true)
   _cwt_log_info "Checking for updates..."
 
   local pull_output
@@ -1197,7 +1199,17 @@ EOF
 
   # Re-source to get new version
   source "$cwt_dir/cwt.sh"
-  if [[ "$old_version" == "$CWT_VERSION" ]]; then
+  new_commit=$(git -C "$cwt_dir" rev-parse --verify HEAD 2>/dev/null || true)
+
+  if [[ -n "$old_commit" && -n "$new_commit" ]]; then
+    if [[ "$old_commit" == "$new_commit" ]]; then
+      _cwt_log_success "Already up to date (v${CWT_VERSION})."
+    elif [[ "$old_version" == "$CWT_VERSION" ]]; then
+      _cwt_log_success "Updated cwt to latest commit (v${CWT_VERSION})."
+    else
+      _cwt_log_success "Updated cwt: $old_version -> $CWT_VERSION"
+    fi
+  elif [[ "$old_version" == "$CWT_VERSION" ]]; then
     _cwt_log_success "Already up to date (v${CWT_VERSION})."
   else
     _cwt_log_success "Updated cwt: $old_version -> $CWT_VERSION"
