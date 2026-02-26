@@ -192,7 +192,21 @@ If you pass a specific name and no worktrees exist, `cwt rm <name>` returns an e
 cwt update
 ```
 
-Pulls the latest version from git and re-sources `cwt.sh`. Requires cwt to be installed via `git clone` (not Homebrew).
+For git-based installs (for example `~/.cwt`), `cwt update` pulls the latest commit and re-sources `cwt.sh`.
+
+If you installed cwt in a custom path, set `CWT_DIR` before running update:
+
+```sh
+CWT_DIR=/path/to/cwt cwt update
+```
+
+If you installed via Homebrew, update with:
+
+```sh
+brew upgrade cwt
+```
+
+If you installed via a plugin manager, update through the plugin manager, or point `CWT_DIR` to that plugin checkout and run `cwt update`.
 
 ### Quiet mode
 
@@ -287,11 +301,19 @@ Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branc
 
 ## Uninstall
 
+For git-based installs (default):
+
 ```sh
 ~/.cwt/uninstall.sh
 ```
 
-Or manually: remove `~/.cwt/` and the source line from `.zshrc`.
+For Homebrew installs:
+
+```sh
+brew uninstall cwt
+```
+
+For plugin-manager installs, remove the plugin checkout and related `cwt` lines from your shell config.
 
 ## License
 

@@ -26,9 +26,11 @@ if [ -f "$ZSHRC" ]; then
   if grep -qF '.cwt/cwt.sh' "$ZSHRC" 2>/dev/null; then
     # macOS sed requires '' after -i
     if [ "$(uname -s)" = "Darwin" ]; then
+      sed -i '' '/# cwt - AI Worktree Manager/d' "$ZSHRC"
       sed -i '' '/# cwt - Claude Worktree Manager/d' "$ZSHRC"
       sed -i '' '/\.cwt\/cwt\.sh/d' "$ZSHRC"
     else
+      sed -i '/# cwt - AI Worktree Manager/d' "$ZSHRC"
       sed -i '/# cwt - Claude Worktree Manager/d' "$ZSHRC"
       sed -i '/\.cwt\/cwt\.sh/d' "$ZSHRC"
     fi
