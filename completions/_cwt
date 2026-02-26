@@ -1,0 +1,103 @@
+#compdef cwt
+# ─────────────────────────────────────────────────────────────────────────────
+# Zsh completion for cwt - Claude Worktree Manager
+# ─────────────────────────────────────────────────────────────────────────────
+
+# List existing worktree names from .claude/worktrees/*/
+(( $+functions[_cwt_worktree_names] )) || _cwt_worktree_names() {
+  local git_root wt_dir
+  git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    wt_dir="$CWT_WORKTREE_DIR"
+  else
+    wt_dir="${git_root}/.claude/worktrees"
+  fi
+
+  [[ -d "$wt_dir" ]] || return
+
+  local -a names
+  local d
+  for d in "$wt_dir"/*(N/); do
+    names+=("${d:t}")
+  done
+  (( ${#names} )) && compadd -X "worktrees" -a names
+}
+
+# List git branch names
+(( $+functions[_cwt_branches] )) || _cwt_branches() {
+  local git_root
+  git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+
+  local -a branches
+  branches=( ${(f)"$(git -C "$git_root" branch --format='%(refname:short)' 2>/dev/null)"} )
+  (( ${#branches} )) && compadd -X "branches" -a branches
+}
+
+_cwt_new() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--no-claude[Skip launching Claude Code]' \
+    ':name:' \
+    ':base-branch:_cwt_branches' \
+    ':branch-name:'
+}
+
+_cwt_ls() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]'
+}
+
+_cwt_cd() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--claude[Launch Claude Code after entering]' \
+    ':name:_cwt_worktree_names'
+}
+
+_cwt_rm() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-f --force)'{-f,--force}'[Skip confirmation prompt]' \
+    ':name:_cwt_worktree_names'
+}
+
+_cwt_update() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]'
+}
+
+_cwt() {
+  local -a commands
+  commands=(
+    'new:Create a new worktree and launch Claude Code'
+    'ls:List all worktrees with status'
+    'cd:Enter an existing worktree'
+    'rm:Remove a worktree'
+    'update:Self-update cwt'
+  )
+
+  _arguments -s \
+    '(-q --quiet)'{-q,--quiet}'[Suppress informational messages]' \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-v --version)'{-v,--version}'[Show version]' \
+    '1:command:->command' \
+    '*::args:->args'
+
+  case "$state" in
+    command)
+      _describe -t commands 'cwt command' commands
+      ;;
+    args)
+      case "$words[1]" in
+        new)    _cwt_new    ;;
+        ls)     _cwt_ls     ;;
+        cd)     _cwt_cd     ;;
+        rm)     _cwt_rm     ;;
+        update) _cwt_update ;;
+      esac
+      ;;
+  esac
+}
+
+_cwt "$@"

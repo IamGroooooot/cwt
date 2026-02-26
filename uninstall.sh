@@ -2,11 +2,11 @@
 # cwt uninstaller
 set -e
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'
-DIM='\033[2m'; NC='\033[0m'
+RED=$(printf '\033[0;31m'); GREEN=$(printf '\033[0;32m'); CYAN=$(printf '\033[0;36m')
+DIM=$(printf '\033[2m'); NC=$(printf '\033[0m')
 
-info() { printf " ${CYAN}→${NC} %s\n" "$*"; }
-ok()   { printf " ${GREEN}✓${NC} %s\n" "$*"; }
+info() { printf " %s→%s %s\n" "$CYAN" "$NC" "$*"; }
+ok()   { printf " %s✓%s %s\n" "$GREEN" "$NC" "$*"; }
 
 CWT_DIR="${CWT_DIR:-$HOME/.cwt}"
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"

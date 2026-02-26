@@ -1,4 +1,6 @@
 #!/usr/bin/env zsh
+# shellcheck disable=SC1009,SC1036,SC1058,SC1072,SC1073
+# ↑ zsh glob qualifiers like (N) and ${var:t} can't be parsed by ShellCheck
 # ─────────────────────────────────────────────────────────────────────────────
 # cwt - Claude Worktree Manager
 # Manage git worktrees for parallel Claude Code sessions.
@@ -9,16 +11,19 @@
 # Usage:
 #   cwt new [name] [base] [branch]   Create a worktree
 #   cwt ls                           List worktrees
+#   cwt cd [name]                    Enter a worktree
 #   cwt rm [name]                    Remove a worktree
+#   cwt update                       Self-update cwt
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.1.0"
+CWT_VERSION="0.2.0"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
+# Checks stderr (-t 2) since informational output is routed there.
 
-if [[ -z "$NO_COLOR" ]] && [[ -t 1 ]]; then
+if [[ -z "$NO_COLOR" ]] && [[ -t 2 ]]; then
   _cwt_red()     { printf '\033[0;31m%s\033[0m' "$*"; }
   _cwt_green()   { printf '\033[0;32m%s\033[0m' "$*"; }
   _cwt_yellow()  { printf '\033[0;33m%s\033[0m' "$*"; }
@@ -37,12 +42,25 @@ else
 fi
 
 # ── Logging helpers ─────────────────────────────────────────────────────────
+# All informational output goes to stderr so stdout remains pipeable.
+# _cwt_log_info and _cwt_log_item respect CWT_QUIET (set by -q/--quiet).
 
-_cwt_log_success() { echo " $(_cwt_green '✓') $*"; }
+_cwt_log_success() { echo " $(_cwt_green '✓') $*" >&2; }
 _cwt_log_error()   { echo " $(_cwt_red '✗') $*" >&2; }
-_cwt_log_info()    { echo " $(_cwt_cyan '→') $*"; }
-_cwt_log_warn()    { echo " $(_cwt_yellow '!') $*"; }
-_cwt_log_item()    { echo "   $(_cwt_dim '•') $*"; }
+_cwt_log_info()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo " $(_cwt_cyan '→') $*" >&2; }
+_cwt_log_warn()    { echo " $(_cwt_yellow '!') $*" >&2; }
+_cwt_log_item()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo "   $(_cwt_dim '•') $*" >&2; }
+
+# ── Config loader ─────────────────────────────────────────────────────────
+
+_cwt_load_config() {
+  local config_file="${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
+  [[ -f "$config_file" ]] && source "$config_file"
+}
+
+_cwt_is_interactive() {
+  [[ -t 0 ]]
+}
 
 # ── Relative time helper ───────────────────────────────────────────────────
 
@@ -72,7 +90,7 @@ _cwt_require_git() {
     _cwt_log_error "Not inside a git repository. Run cwt from within a git project."
     return 1
   fi
-  _cwt_worktrees_dir="${_cwt_git_root}/.claude/worktrees"
+  _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.claude/worktrees}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -81,6 +99,7 @@ _cwt_require_git() {
 
 _cwt_new() {
   local no_claude=0
+  [[ "$CWT_AUTO_CLAUDE" == "false" ]] && no_claude=1
   local positional=()
 
   for arg in "$@"; do
@@ -112,6 +131,11 @@ EOF
       --no-claude)
         no_claude=1
         ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt new: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt new --help') for usage." >&2
+        return 1
+        ;;
       *)
         positional+=("$arg")
         ;;
@@ -121,7 +145,12 @@ EOF
   # 1) Worktree name
   local name="${positional[1]}"
   if [[ -z "$name" ]]; then
-    echo -n "$(_cwt_cyan '?') Worktree name: "
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--no-claude]" >&2
+      return 1
+    fi
+    echo -n "$(_cwt_cyan '?') Worktree name: " >&2
     read name
     [[ -z "$name" ]] && { _cwt_log_error "Name is required."; return 1; }
   fi
@@ -134,9 +163,14 @@ EOF
 
   # 2) Base branch selection
   local base_branch="${positional[2]}"
+  if [[ -z "$base_branch" && -n "$CWT_DEFAULT_BASE_BRANCH" ]]; then
+    base_branch="$CWT_DEFAULT_BASE_BRANCH"
+  fi
   if [[ -z "$base_branch" ]]; then
     local branches=("HEAD" $(git -C "$_cwt_git_root" branch --format='%(refname:short)' 2>/dev/null))
-    if command -v fzf &>/dev/null; then
+    if ! _cwt_is_interactive; then
+      base_branch="HEAD"
+    elif command -v fzf &>/dev/null; then
       base_branch=$(printf '%s\n' "${branches[@]}" | fzf \
         --prompt="Base branch > " \
         --height=40% \
@@ -144,14 +178,14 @@ EOF
         --header="ESC: cancel  Enter: select")
       [[ -z "$base_branch" ]] && { _cwt_log_warn "Cancelled."; return 0; }
     else
-      echo ""
+      echo "" >&2
       _cwt_log_info "Select base branch:"
       local i=1
       for b in "${branches[@]}"; do
-        echo "   $(_cwt_dim "$i)") $b"
+        echo "   $(_cwt_dim "$i)") $b" >&2
         ((i++))
       done
-      echo -n "$(_cwt_cyan '?') Choice $(_cwt_dim '(default: 1=HEAD)'): "
+      echo -n "$(_cwt_cyan '?') Choice $(_cwt_dim '(default: 1=HEAD)'): " >&2
       read num
       if [[ -z "$num" ]]; then
         base_branch="HEAD"
@@ -167,7 +201,7 @@ EOF
   # 3) Branch name (auto-generated, with collision check)
   local branch_name="${positional[3]}"
   if [[ -z "$branch_name" ]]; then
-    local rand branch_name
+    local rand
     local attempts=0
     while (( attempts < 5 )); do
       rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
@@ -182,7 +216,7 @@ EOF
   fi
 
   # 4) Create worktree
-  echo ""
+  echo "" >&2
   _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."
 
   git -C "$_cwt_git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1
@@ -212,16 +246,18 @@ EOF
   fi
 
   # 6) Summary box
-  echo ""
-  echo "  $(_cwt_dim '┌──────────────────────────────────────────────')"
-  echo "  $(_cwt_dim '│') $(_cwt_green '✓') Worktree ready"
-  echo "  $(_cwt_dim '│')"
-  echo "  $(_cwt_dim '│')  $(_cwt_bold 'Name')     $name"
-  echo "  $(_cwt_dim '│')  $(_cwt_bold 'Branch')   $branch_name"
-  echo "  $(_cwt_dim '│')  $(_cwt_bold 'Base')     $base_branch"
-  echo "  $(_cwt_dim '│')  $(_cwt_bold 'Path')     $(_cwt_dim "$worktree_path")"
-  echo "  $(_cwt_dim '└──────────────────────────────────────────────')"
-  echo ""
+  {
+    echo ""
+    echo "  $(_cwt_dim '┌──────────────────────────────────────────────')"
+    echo "  $(_cwt_dim '│') $(_cwt_green '✓') Worktree ready"
+    echo "  $(_cwt_dim '│')"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Name')     $name"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Branch')   $branch_name"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Base')     $base_branch"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Path')     $(_cwt_dim "$worktree_path")"
+    echo "  $(_cwt_dim '└──────────────────────────────────────────────')"
+    echo ""
+  } >&2
 
   # 7) Enter worktree and optionally launch Claude
   pushd "$worktree_path" > /dev/null
@@ -253,8 +289,14 @@ $(_cwt_bold 'OPTIONS')
 
 $(_cwt_bold 'OUTPUT')
   Shows all worktrees with branch, status, and last commit info.
+  Data table goes to stdout; decoration goes to stderr.
 EOF
         return 0
+        ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt ls: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt ls --help') for usage." >&2
+        return 1
         ;;
     esac
   done
@@ -301,27 +343,30 @@ EOF
     return 0
   fi
 
-  echo ""
-  echo "  $(_cwt_bold "$(_cwt_cyan 'Claude Worktrees')") $(_cwt_dim "($_cwt_git_root)")"
-  echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')"
-  echo ""
+  # Header decoration goes to stderr
+  echo "" >&2
+  echo "  $(_cwt_bold "$(_cwt_cyan 'Claude Worktrees')") $(_cwt_dim "($_cwt_git_root)")" >&2
+  echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')" >&2
+  echo "" >&2
 
+  # Data table goes to stdout
   for entry in "${entries[@]}"; do
     local wt_name="${entry%%|*}"; entry="${entry#*|}"
     local branch="${entry%%|*}"; entry="${entry#*|}"
-    local status="${entry%%|*}"; entry="${entry#*|}"
+    local wt_status="${entry%%|*}"; entry="${entry#*|}"
     local hash="${entry%%|*}"; entry="${entry#*|}"
     local msg="${entry%%|*}"; entry="${entry#*|}"
     local when="$entry"
 
-    printf "  $(_cwt_bold '%-18s') $(_cwt_blue '%-24s') %s\n" "$wt_name" "$branch" "$status"
+    printf "  $(_cwt_bold '%-18s') $(_cwt_blue '%-24s') %s\n" "$wt_name" "$branch" "$wt_status"
     printf "  $(_cwt_dim '%-18s') $(_cwt_dim '%s %s') $(_cwt_dim '(%s)')\n" "" "$hash" "$msg" "$when"
     echo ""
   done
 
-  echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')"
-  echo "  $(_cwt_dim "Total: $count worktree(s)")"
-  echo ""
+  # Footer decoration goes to stderr
+  echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')" >&2
+  echo "  $(_cwt_dim "Total: $count worktree(s)")" >&2
+  echo "" >&2
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -357,6 +402,11 @@ EOF
         ;;
       -f|--force)
         force=1
+        ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt rm: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt rm --help') for usage." >&2
+        return 1
         ;;
       *)
         positional+=("$arg")
@@ -395,6 +445,11 @@ EOF
       return 1
     fi
   else
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt rm <name> [-f|--force]" >&2
+      return 1
+    fi
     # Interactive selection
     if command -v fzf &>/dev/null; then
       selected=$(printf '%s\n' "${worktree_names[@]}" | fzf \
@@ -403,14 +458,14 @@ EOF
         --border \
         --header="ESC: cancel  Enter: select")
     else
-      echo ""
+      echo "" >&2
       _cwt_log_info "Select worktree to remove:"
       local i=1
       for wt_name in "${worktree_names[@]}"; do
-        echo "   $(_cwt_dim "$i)") $wt_name"
+        echo "   $(_cwt_dim "$i)") $wt_name" >&2
         ((i++))
       done
-      echo -n "$(_cwt_cyan '?') Choice: "
+      echo -n "$(_cwt_cyan '?') Choice: " >&2
       read num
       if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_names[@]} )); then
         selected="${worktree_names[$num]}"
@@ -428,13 +483,18 @@ EOF
 
   # Confirm
   if [[ $force -eq 0 ]]; then
-    echo ""
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Confirmation required in non-interactive mode."
+      echo "  Re-run with $(_cwt_bold '--force') to remove non-interactively." >&2
+      return 1
+    fi
+    echo "" >&2
     _cwt_log_warn "This will remove:"
     _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
     [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
     _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
-    echo ""
-    echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): "
+    echo "" >&2
+    echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): " >&2
     read confirm
     if [[ "$confirm" != [yY] ]]; then
       _cwt_log_warn "Cancelled."
@@ -456,7 +516,7 @@ EOF
       fi
     else
       _cwt_log_warn "Worktree has uncommitted changes."
-      echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): "
+      echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
       read force_confirm
       if [[ "$force_confirm" == [yY] ]]; then
         git worktree remove --force "$worktree_path" 2>&1
@@ -482,7 +542,7 @@ EOF
         _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
     else
       _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
-      echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): "
+      echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
       read branch_confirm
       if [[ "$branch_confirm" == [yY] ]]; then
         git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null && \
@@ -501,6 +561,9 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 
 _cwt_cd() {
+  local launch_claude=0
+  local positional=()
+
   for arg in "$@"; do
     case "$arg" in
       --help|-h)
@@ -523,6 +586,17 @@ $(_cwt_bold 'EXAMPLES')
   cwt cd                     # Interactive selection
 EOF
         return 0 ;;
+      --claude)
+        launch_claude=1
+        ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt cd --help') for usage." >&2
+        return 1
+        ;;
+      *)
+        positional+=("$arg")
+        ;;
     esac
   done
 
@@ -530,17 +604,6 @@ EOF
     _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
-
-  local launch_claude=0
-  local positional=()
-
-  for arg in "$@"; do
-    case "$arg" in
-      --claude) launch_claude=1 ;;
-      -*) ;;
-      *)  positional+=("$arg") ;;
-    esac
-  done
 
   # Collect names
   local names=()
@@ -564,20 +627,25 @@ EOF
       return 1
     fi
   else
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt cd <name> [--claude]" >&2
+      return 1
+    fi
     if command -v fzf &>/dev/null; then
       selected=$(printf '%s\n' "${names[@]}" | fzf \
         --prompt="Enter worktree > " \
         --height=40% --border \
         --header="ESC: cancel  Enter: select")
     else
-      echo ""
+      echo "" >&2
       _cwt_log_info "Select worktree:"
       local i=1
       for n in "${names[@]}"; do
-        echo "   $(_cwt_dim "$i)") $n"
+        echo "   $(_cwt_dim "$i)") $n" >&2
         ((i++))
       done
-      echo -n "$(_cwt_cyan '?') Choice: "
+      echo -n "$(_cwt_cyan '?') Choice: " >&2
       read num
       if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#names[@]} )); then
         selected="${names[$num]}"
@@ -602,27 +670,93 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Subcommand: cwt update
+# ═══════════════════════════════════════════════════════════════════════════
+
+_cwt_update() {
+  for arg in "$@"; do
+    case "$arg" in
+      --help|-h)
+        cat <<EOF
+$(_cwt_bold 'cwt update') - Self-update cwt
+
+$(_cwt_bold 'USAGE')
+  cwt update [options]
+
+$(_cwt_bold 'OPTIONS')
+  -h, --help       Show this help
+
+$(_cwt_bold 'DESCRIPTION')
+  Pulls the latest version from git and re-sources cwt.sh.
+  Requires cwt to be installed via git clone.
+EOF
+        return 0
+        ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt update: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt update --help') for usage." >&2
+        return 1
+        ;;
+    esac
+  done
+
+  local cwt_dir="${CWT_DIR:-$HOME/.cwt}"
+  if [[ ! -d "$cwt_dir/.git" ]]; then
+    _cwt_log_error "cwt not installed via git. Cannot update."
+    return 1
+  fi
+
+  local old_version="$CWT_VERSION"
+  _cwt_log_info "Checking for updates..."
+
+  local pull_output
+  pull_output=$(git -C "$cwt_dir" pull --ff-only 2>&1)
+  if [[ $? -ne 0 ]]; then
+    _cwt_log_error "Update failed. Check your network connection."
+    _cwt_log_item "$pull_output"
+    return 1
+  fi
+
+  # Re-source to get new version
+  source "$cwt_dir/cwt.sh"
+  if [[ "$old_version" == "$CWT_VERSION" ]]; then
+    _cwt_log_success "Already up to date (v${CWT_VERSION})."
+  else
+    _cwt_log_success "Updated cwt: $old_version -> $CWT_VERSION"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Main entry point: cwt
 # ═══════════════════════════════════════════════════════════════════════════
 
 cwt() {
-  local subcmd="$1"
+  _cwt_load_config
+  local CWT_QUIET=0
 
-  case "$subcmd" in
-    --help|-h|"")
-      cat <<EOF
+  # Parse global flags before subcommand dispatch
+  while [[ "$1" == -* ]]; do
+    case "$1" in
+      -q|--quiet)
+        CWT_QUIET=1
+        shift
+        ;;
+      -h|--help)
+        cat <<EOF
 $(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - Claude Worktree Manager
 
 $(_cwt_bold 'USAGE')
-  cwt <command> [options]
+  cwt [global-options] <command> [options]
 
 $(_cwt_bold 'COMMANDS')
-  new    Create a new worktree and launch Claude Code
-  ls     List all worktrees with status
-  cd     Enter an existing worktree
-  rm     Remove a worktree
+  new      Create a new worktree and launch Claude Code
+  ls       List all worktrees with status
+  cd       Enter an existing worktree
+  rm       Remove a worktree
+  update   Self-update cwt
 
-$(_cwt_bold 'OPTIONS')
+$(_cwt_bold 'GLOBAL OPTIONS')
+  -q, --quiet      Suppress informational messages
   -h, --help       Show this help
   -v, --version    Show version
 
@@ -631,20 +765,60 @@ $(_cwt_bold 'EXAMPLES')
   cwt new fix-auth main      # Create based on main branch
   cwt new --no-claude task   # Create without launching Claude
   cwt ls                     # List all worktrees
-  cwt cd fix-auth             # Enter existing worktree
-  cwt cd fix-auth --claude    # Enter and launch Claude
-  cwt rm fix-auth             # Remove worktree "fix-auth"
-  cwt rm -f fix-auth          # Force remove (skip confirmation)
+  cwt cd fix-auth            # Enter existing worktree
+  cwt cd fix-auth --claude   # Enter and launch Claude
+  cwt rm fix-auth            # Remove worktree "fix-auth"
+  cwt rm -f fix-auth         # Force remove (skip confirmation)
+  cwt update                 # Update cwt to latest version
+  cwt -q new fix-auth main   # Create worktree quietly
 
 $(_cwt_bold 'DEPENDENCIES')
   Required: git, zsh
   Optional: fzf $(_cwt_dim '(interactive branch/worktree selection)')
 EOF
+        return 0
+        ;;
+      -v|--version)
+        echo "cwt $CWT_VERSION"
+        return 0
+        ;;
+      *)
+        _cwt_log_error "Unknown option: $(_cwt_bold "$1")"
+        echo "  Run $(_cwt_bold 'cwt --help') for usage." >&2
+        return 1
+        ;;
+    esac
+  done
+
+  local subcmd="$1"
+
+  case "$subcmd" in
+    "")
+      cat <<EOF
+$(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - Claude Worktree Manager
+
+$(_cwt_bold 'USAGE')
+  cwt [global-options] <command> [options]
+
+$(_cwt_bold 'COMMANDS')
+  new      Create a new worktree and launch Claude Code
+  ls       List all worktrees with status
+  cd       Enter an existing worktree
+  rm       Remove a worktree
+  update   Self-update cwt
+
+$(_cwt_bold 'GLOBAL OPTIONS')
+  -q, --quiet      Suppress informational messages
+  -h, --help       Show this help
+  -v, --version    Show version
+
+Run $(_cwt_bold 'cwt <command> --help') for command-specific help.
+EOF
       return 0
       ;;
-    --version|-v)
-      echo "cwt $CWT_VERSION"
-      return 0
+    update)
+      shift
+      _cwt_update "$@"
       ;;
     new|ls|cd|rm)
       _cwt_require_git || return 1
@@ -653,8 +827,7 @@ EOF
       ;;
     *)
       _cwt_log_error "Unknown command: $(_cwt_bold "$subcmd")"
-      echo ""
-      echo "  Run $(_cwt_bold 'cwt --help') for usage."
+      echo "  Run $(_cwt_bold 'cwt --help') for usage." >&2
       return 1
       ;;
   esac
