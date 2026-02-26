@@ -18,8 +18,8 @@ ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
 SOURCE_LINE='[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"'
 
 # ── Preflight ──────────────────────────────────────────────────────
-command -v git >/dev/null 2>&1 || { err "git is required."; exit 1; }
-command -v zsh >/dev/null 2>&1 || { err "zsh is required."; exit 1; }
+command -v git >/dev/null 2>&1 || { err "git is required. Install: apt install git / brew install git"; exit 1; }
+command -v zsh >/dev/null 2>&1 || { err "zsh is required. Install: apt install zsh / brew install zsh"; exit 1; }
 
 # ── Install ────────────────────────────────────────────────────────
 echo ""
@@ -41,7 +41,8 @@ else
 fi
 
 # ── Shell integration ──────────────────────────────────────────────
-if [ -f "$ZSHRC" ] && grep -qF '.cwt/cwt.sh' "$ZSHRC" 2>/dev/null; then
+touch "$ZSHRC" 2>/dev/null || true
+if grep -qF '.cwt/cwt.sh' "$ZSHRC" 2>/dev/null; then
   info "Already configured in ${DIM}${ZSHRC}${NC}"
 else
   printf '\n# cwt - Claude Worktree Manager\n%s\n' "$SOURCE_LINE" >> "$ZSHRC"
