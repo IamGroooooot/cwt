@@ -1,0 +1,55 @@
+# 워크트리 제거
+source "${ZDOTDIR:-$HOME}/.zfunc/_cwt_init" || return 1
+
+if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+  echo "error: 워크트리가 없습니다." >&2
+  return 1
+fi
+
+# 워크트리 목록 수집
+local worktree_names=()
+for d in "${_cwt_worktrees_dir}"/*/(N); do
+  [[ -d "$d" ]] && worktree_names+=("${d:t}")
+done
+
+if [[ ${#worktree_names[@]} -eq 0 ]]; then
+  echo "제거할 워크트리가 없습니다."
+  return 1
+fi
+
+# fzf or 번호 선택
+local selected
+if command -v fzf &>/dev/null; then
+  selected=$(printf '%s\n' "${worktree_names[@]}" | fzf \
+    --prompt="제거할 워크트리 > " \
+    --height=40% \
+    --border \
+    --header="ESC: 취소  Enter: 선택")
+else
+  echo "워크트리 목록:"
+  local i=1
+  for name in "${worktree_names[@]}"; do
+    echo "  $i) $name"
+    ((i++))
+  done
+  echo -n "번호 선택: "
+  read num
+  if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_names[@]} )); then
+    selected="${worktree_names[$num]}"
+  else
+    echo "error: 잘못된 선택입니다." >&2
+    return 1
+  fi
+fi
+
+[[ -z "$selected" ]] && echo "취소되었습니다." && return 0
+
+local worktree_path="${_cwt_worktrees_dir}/${selected}"
+
+echo -n "'$selected' 제거할까요? (y/N): "
+read confirm
+if [[ "$confirm" == y || "$confirm" == Y ]]; then
+  git worktree remove "$worktree_path" && echo "제거 완료: $selected"
+else
+  echo "취소되었습니다."
+fi

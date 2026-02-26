@@ -1,0 +1,21 @@
+# 워크트리 목록
+source "${ZDOTDIR:-$HOME}/.zfunc/_cwt_init" || return 1
+
+if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+  echo "워크트리가 없습니다."
+  return 0
+fi
+
+local count=0
+for d in "${_cwt_worktrees_dir}"/*/(N); do
+  [[ ! -d "$d" ]] && continue
+  local name="${d:t}"
+  local branch=$(git -C "$d" branch --show-current 2>/dev/null)
+  local last_commit=$(git -C "$d" log -1 --format='%h %s' 2>/dev/null)
+  echo "$name  ($branch)  $last_commit"
+  ((count++))
+done
+
+if [[ $count -eq 0 ]]; then
+  echo "워크트리가 없습니다."
+fi
