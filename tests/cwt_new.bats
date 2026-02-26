@@ -63,6 +63,47 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "cwt new: .worktreeinclude copies files and glob matches" {
+  mkdir -p "$REPO_DIR/config"
+  echo "API_KEY=secret" > "$REPO_DIR/.env"
+  echo '{"token":"x"}' > "$REPO_DIR/config/app.secret.json"
+  cat > "$REPO_DIR/.worktreeinclude" <<'EOF'
+# secrets
+.env
+config/*.secret.json
+EOF
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-copy HEAD
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_DIR/.worktrees/include-copy/.env" ]
+  [ -f "$REPO_DIR/.worktrees/include-copy/config/app.secret.json" ]
+}
+
+@test "cwt new: .worktreeinclude ignores comments and missing patterns" {
+  echo "hello" > "$REPO_DIR/keep.txt"
+  cat > "$REPO_DIR/.worktreeinclude" <<'EOF'
+# comment line
+
+missing.file
+keep.txt
+EOF
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-ignore HEAD
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_DIR/.worktrees/include-ignore/keep.txt" ]
+  [ ! -e "$REPO_DIR/.worktrees/include-ignore/missing.file" ]
+}
+
 @test "cwt new: duplicate name returns error" {
   # Create first worktree
   zsh -c "

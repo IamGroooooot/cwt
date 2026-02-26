@@ -455,6 +455,17 @@ EOF
     return 1
   fi
 
+  # Fail fast for explicit split/tab requests before mutating repository state.
+  if [[ $no_launch -eq 0 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
+    local preflight_mux
+    preflight_mux=$(_cwt_active_multiplexer)
+    if [[ "$preflight_mux" == "none" ]]; then
+      _cwt_log_error "Launch target '$launch_target' requires tmux or zellij."
+      _cwt_log_item "Run inside tmux/zellij, or use $(_cwt_bold '--current')."
+      return 1
+    fi
+  fi
+
   # 1) Worktree name
   local name="${positional[1]}"
   if [[ -z "$name" ]]; then
