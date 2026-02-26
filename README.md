@@ -126,6 +126,8 @@ cwt cd fix-auth --claude   # enter and launch Claude Code
 cwt cd                     # interactive selection
 ```
 
+When you run `cwt cd` with no name from inside a linked worktree, it moves you back to the main repository and suggests other available worktrees.
+
 ### Remove a worktree
 
 ```sh
@@ -135,6 +137,7 @@ cwt rm                 # interactive selection
 ```
 
 Removes the worktree directory and its associated branch.
+If you pass a specific name and no worktrees exist, `cwt rm <name>` returns an error.
 
 ### Update cwt
 
@@ -158,7 +161,8 @@ cwt --quiet ls                  # list with minimal output
 When stdin is not a TTY (for example in CI or scripts), cwt fails fast instead of waiting on prompts:
 
 - `cwt new` without a name returns an error with usage guidance.
-- `cwt cd` and `cwt rm` without a name return an error with usage guidance.
+- `cwt cd` without a name returns an error in non-interactive mode only when run from the main repository.
+- `cwt rm` without a name returns an error with usage guidance when worktrees exist.
 - `cwt rm <name>` without `--force` returns an error because confirmation cannot be prompted.
 - `cwt new <name>` without a base branch defaults to `HEAD` in non-interactive mode.
 

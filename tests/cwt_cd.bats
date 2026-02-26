@@ -83,10 +83,38 @@ teardown() {
   [[ "$output" == *"msg-test"* ]]
 }
 
+@test "cwt cd: from inside worktree without name enters main repo" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-claude home-wt HEAD
+  " 2>/dev/null
+
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-claude other-wt HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR/.claude/worktrees/home-wt'
+    source '$CWT_SH'
+    cwt cd
+    pwd
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Entered main repository"* ]]
+  [[ "$output" == *"$REPO_DIR"* ]]
+  [[ "$output" == *"other-wt"* ]]
+}
+
 @test "cwt cd: no worktrees shows helpful message" {
   run_cwt_in "$REPO_DIR" "cwt cd"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No worktrees yet"* ]] || [[ "$output" == *"cwt new"* ]]
+  [[ "$output" == *"No Claude worktrees yet"* ]] || [[ "$output" == *"cwt new"* ]]
 }
 
 @test "cwt cd: non-interactive without name returns guidance" {

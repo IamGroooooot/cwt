@@ -89,7 +89,7 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
-@test "cwt rm: no worktrees directory returns error" {
+@test "cwt rm: named remove without worktrees returns error" {
   run zsh -c "
     export NO_COLOR=1
     cd '$REPO_DIR'
@@ -97,7 +97,19 @@ teardown() {
     cwt rm something
   "
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No worktrees"* ]]
+  [[ "$output" == *"No Claude worktrees found"* ]]
+  [[ "$output" == *"something"* ]]
+}
+
+@test "cwt rm: no name without worktrees shows informative message" {
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No Claude worktrees to remove"* ]]
 }
 
 @test "cwt rm: non-interactive without name returns guidance" {
@@ -137,6 +149,29 @@ teardown() {
   [[ "$output" == *"Confirmation required in non-interactive mode"* ]]
   [[ "$output" == *"--force"* ]]
   [ -d "$REPO_DIR/.claude/worktrees/rm-confirm" ]
+}
+
+@test "cwt rm: can remove current worktree and return to main repo" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-claude rm-current HEAD
+  " 2>/dev/null
+
+  [ -d "$REPO_DIR/.claude/worktrees/rm-current" ]
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR/.claude/worktrees/rm-current'
+    source '$CWT_SH'
+    cwt rm -f rm-current
+    pwd
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Moved to main repository"* ]]
+  [[ "$output" == *"$REPO_DIR"* ]]
+  [ ! -d "$REPO_DIR/.claude/worktrees/rm-current" ]
 }
 
 @test "cwt rm --help: shows help" {

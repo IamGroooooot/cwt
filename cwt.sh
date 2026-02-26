@@ -85,11 +85,26 @@ _cwt_relative_time() {
 # ── Git context helper ─────────────────────────────────────────────────────
 
 _cwt_require_git() {
-  _cwt_git_root=$(git rev-parse --show-toplevel 2>/dev/null)
+  _cwt_current_root=$(git rev-parse --show-toplevel 2>/dev/null)
   if [[ $? -ne 0 ]]; then
     _cwt_log_error "Not inside a git repository. Run cwt from within a git project."
     return 1
   fi
+
+  _cwt_current_root="${_cwt_current_root:A}"
+
+  local git_common_dir
+  git_common_dir=$(git rev-parse --git-common-dir 2>/dev/null)
+  if [[ -z "$git_common_dir" ]]; then
+    _cwt_git_root="$_cwt_current_root"
+  else
+    if [[ "$git_common_dir" != /* ]]; then
+      git_common_dir="${_cwt_current_root}/${git_common_dir}"
+    fi
+    git_common_dir="${git_common_dir:A}"
+    _cwt_git_root="${git_common_dir:h}"
+  fi
+
   _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.claude/worktrees}"
 }
 
@@ -170,14 +185,27 @@ EOF
     local branches=("HEAD" $(git -C "$_cwt_git_root" branch --format='%(refname:short)' 2>/dev/null))
     if ! _cwt_is_interactive; then
       base_branch="HEAD"
-    elif command -v fzf &>/dev/null; then
-      base_branch=$(printf '%s\n' "${branches[@]}" | fzf \
-        --prompt="Base branch > " \
-        --height=40% \
-        --border \
-        --header="ESC: cancel  Enter: select")
-      [[ -z "$base_branch" ]] && { _cwt_log_warn "Cancelled."; return 0; }
     else
+      local fzf_status=1
+      if command -v fzf &>/dev/null; then
+        base_branch=$(printf '%s\n' "${branches[@]}" | fzf \
+          --prompt="Base branch > " \
+          --height=40% \
+          --border \
+          --header="ESC: cancel  Enter: select" 2>/dev/null)
+        fzf_status=$?
+        if [[ $fzf_status -eq 130 ]]; then
+          _cwt_log_warn "Cancelled."
+          return 0
+        elif [[ $fzf_status -ne 0 ]]; then
+          base_branch=""
+          _cwt_log_warn "fzf failed. Falling back to numbered selection."
+        fi
+      fi
+
+      if [[ -n "$base_branch" ]]; then
+        :
+      else
       echo "" >&2
       _cwt_log_info "Select base branch:"
       local i=1
@@ -194,6 +222,7 @@ EOF
       else
         _cwt_log_error "Invalid selection."
         return 1
+      fi
       fi
     fi
   fi
@@ -302,7 +331,7 @@ EOF
   done
 
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
-    _cwt_log_info "No worktrees found."
+    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -339,7 +368,7 @@ EOF
   done
 
   if [[ $count -eq 0 ]]; then
-    _cwt_log_info "No worktrees found."
+    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -414,9 +443,15 @@ EOF
     esac
   done
 
+  local selected="${positional[1]}"
+
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
-    _cwt_log_error "No worktrees directory found."
-    return 1
+    if [[ -n "$selected" ]]; then
+      _cwt_log_error "No Claude worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      return 1
+    fi
+    _cwt_log_info "No Claude worktrees to remove."
+    return 0
   fi
 
   # Collect worktree names
@@ -426,12 +461,13 @@ EOF
   done
 
   if [[ ${#worktree_names[@]} -eq 0 ]]; then
+    if [[ -n "$selected" ]]; then
+      _cwt_log_error "No Claude worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      return 1
+    fi
     _cwt_log_info "No worktrees to remove."
     return 0
   fi
-
-  # Select worktree
-  local selected="${positional[1]}"
 
   if [[ -n "$selected" ]]; then
     # Validate that the given name exists
@@ -451,13 +487,21 @@ EOF
       return 1
     fi
     # Interactive selection
+    local fzf_status=1
     if command -v fzf &>/dev/null; then
       selected=$(printf '%s\n' "${worktree_names[@]}" | fzf \
         --prompt="Remove worktree > " \
         --height=40% \
         --border \
-        --header="ESC: cancel  Enter: select")
-    else
+        --header="ESC: cancel  Enter: select" 2>/dev/null)
+      fzf_status=$?
+      if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
+        selected=""
+        _cwt_log_warn "fzf failed. Falling back to numbered selection."
+      fi
+    fi
+
+    if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
       echo "" >&2
       _cwt_log_info "Select worktree to remove:"
       local i=1
@@ -503,13 +547,21 @@ EOF
   fi
 
   # Remove worktree
+  if [[ "${_cwt_current_root:A}" == "${worktree_path:A}" ]]; then
+    cd "$_cwt_git_root" || {
+      _cwt_log_error "Failed to move to main repository before removal."
+      return 1
+    }
+    _cwt_log_info "Moved to main repository: $(_cwt_dim "$_cwt_git_root")"
+  fi
+
   _cwt_log_info "Removing worktree $(_cwt_bold "$selected")..."
 
   local rm_output
-  rm_output=$(git worktree remove "$worktree_path" 2>&1)
+  rm_output=$(git -C "$_cwt_git_root" worktree remove "$worktree_path" 2>&1)
   if [[ $? -ne 0 ]]; then
     if [[ $force -eq 1 ]]; then
-      git worktree remove --force "$worktree_path" 2>&1
+      git -C "$_cwt_git_root" worktree remove --force "$worktree_path" 2>&1
       if [[ $? -ne 0 ]]; then
         _cwt_log_error "Failed to remove worktree."
         return 1
@@ -519,7 +571,7 @@ EOF
       echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
       read force_confirm
       if [[ "$force_confirm" == [yY] ]]; then
-        git worktree remove --force "$worktree_path" 2>&1
+        git -C "$_cwt_git_root" worktree remove --force "$worktree_path" 2>&1
         if [[ $? -ne 0 ]]; then
           _cwt_log_error "Failed to force remove worktree."
           return 1
@@ -583,7 +635,7 @@ $(_cwt_bold 'OPTIONS')
 $(_cwt_bold 'EXAMPLES')
   cwt cd fix-auth            # Enter worktree directory
   cwt cd fix-auth --claude   # Enter and launch Claude
-  cwt cd                     # Interactive selection
+  cwt cd                     # Main repo: interactive selection, Worktree: return to main
 EOF
         return 0 ;;
       --claude)
@@ -600,8 +652,43 @@ EOF
     esac
   done
 
+  local selected="${positional[1]}"
+  local main_root="${_cwt_git_root:A}"
+  local current_root="${_cwt_current_root:A}"
+
+  # When run inside a worktree with no name, return to the main repository.
+  if [[ -z "$selected" && "$current_root" != "$main_root" ]]; then
+    cd "$_cwt_git_root" || {
+      _cwt_log_error "Failed to enter main repository."
+      return 1
+    }
+
+    _cwt_log_success "Entered main repository"
+    _cwt_log_item "$(_cwt_dim "$_cwt_git_root")"
+
+    if [[ -d "$_cwt_worktrees_dir" ]]; then
+      local recommendations=()
+      for d in "${_cwt_worktrees_dir}"/*/(N); do
+        [[ -d "$d" ]] || continue
+        [[ "${d:A}" == "$current_root" ]] && continue
+        recommendations+=("${d:t}")
+      done
+      if [[ ${#recommendations[@]} -gt 0 ]]; then
+        _cwt_log_info "You can enter: ${recommendations[*]}"
+        _cwt_log_item "Run $(_cwt_bold 'cwt cd <name>') to jump to another worktree."
+      fi
+    fi
+
+    if [[ $launch_claude -eq 1 ]]; then
+      _cwt_log_info "Launching Claude Code..."
+      claude
+    fi
+
+    return 0
+  fi
+
   if [[ ! -d "$_cwt_worktrees_dir" ]]; then
-    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
@@ -612,11 +699,9 @@ EOF
   done
 
   if [[ ${#names[@]} -eq 0 ]]; then
-    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    _cwt_log_info "No Claude worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
-
-  local selected="${positional[1]}"
 
   if [[ -n "$selected" ]]; then
     local found=0
@@ -632,12 +717,20 @@ EOF
       echo "  Usage: cwt cd <name> [--claude]" >&2
       return 1
     fi
+    local fzf_status=1
     if command -v fzf &>/dev/null; then
       selected=$(printf '%s\n' "${names[@]}" | fzf \
         --prompt="Enter worktree > " \
         --height=40% --border \
-        --header="ESC: cancel  Enter: select")
-    else
+        --header="ESC: cancel  Enter: select" 2>/dev/null)
+      fzf_status=$?
+      if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
+        selected=""
+        _cwt_log_warn "fzf failed. Falling back to numbered selection."
+      fi
+    fi
+
+    if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
       echo "" >&2
       _cwt_log_info "Select worktree:"
       local i=1

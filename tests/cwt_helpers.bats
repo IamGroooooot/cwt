@@ -97,6 +97,25 @@ teardown() {
   [[ "$output" == *"exit=0"* ]]
 }
 
+@test "_cwt_require_git: resolves main repo root from linked worktree" {
+  create_test_repo
+  git -C "$REPO_DIR" worktree add "$REPO_DIR/wt-linked" -b wt-linked main >/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    cd '$REPO_DIR/wt-linked'
+    _cwt_require_git
+    echo \"git_root=\$_cwt_git_root\"
+    echo \"current_root=\$_cwt_current_root\"
+  "
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"git_root=$REPO_DIR"* ]]
+  [[ "$output" == *"current_root="* ]]
+  [[ "$output" == *"/wt-linked"* ]]
+}
+
 # ── Color functions with NO_COLOR ────────────────────────────────────
 
 @test "color functions strip colors when NO_COLOR=1" {

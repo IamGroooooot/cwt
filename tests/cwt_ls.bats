@@ -11,10 +11,10 @@ teardown() {
   teardown
 }
 
-@test "cwt ls: no worktrees shows 'No worktrees found'" {
+@test "cwt ls: no worktrees shows helpful message" {
   run_cwt_in "$REPO_DIR" "cwt ls"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"No worktrees found"* ]]
+  [[ "$output" == *"No Claude worktrees yet"* ]]
 }
 
 @test "cwt ls: unknown flag returns error" {
@@ -36,6 +36,19 @@ teardown() {
   run_cwt_in "$REPO_DIR" "cwt ls"
   [ "$status" -eq 0 ]
   [[ "$output" == *"list-test"* ]]
+}
+
+@test "cwt ls: works from inside a worktree directory" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-claude ls-from-wt HEAD
+  " 2>/dev/null
+
+  run_cwt_in "$REPO_DIR/.claude/worktrees/ls-from-wt" "cwt ls"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ls-from-wt"* ]]
 }
 
 @test "cwt ls: shows clean status for unchanged worktree" {
