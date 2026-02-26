@@ -16,14 +16,25 @@
 CWT_VERSION="0.1.0"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
+# Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
 
-_cwt_red()     { printf '\033[0;31m%s\033[0m' "$*"; }
-_cwt_green()   { printf '\033[0;32m%s\033[0m' "$*"; }
-_cwt_yellow()  { printf '\033[0;33m%s\033[0m' "$*"; }
-_cwt_blue()    { printf '\033[0;34m%s\033[0m' "$*"; }
-_cwt_cyan()    { printf '\033[0;36m%s\033[0m' "$*"; }
-_cwt_dim()     { printf '\033[2m%s\033[0m' "$*"; }
-_cwt_bold()    { printf '\033[1m%s\033[0m' "$*"; }
+if [[ -z "$NO_COLOR" ]] && [[ -t 1 ]]; then
+  _cwt_red()     { printf '\033[0;31m%s\033[0m' "$*"; }
+  _cwt_green()   { printf '\033[0;32m%s\033[0m' "$*"; }
+  _cwt_yellow()  { printf '\033[0;33m%s\033[0m' "$*"; }
+  _cwt_blue()    { printf '\033[0;34m%s\033[0m' "$*"; }
+  _cwt_cyan()    { printf '\033[0;36m%s\033[0m' "$*"; }
+  _cwt_dim()     { printf '\033[2m%s\033[0m' "$*"; }
+  _cwt_bold()    { printf '\033[1m%s\033[0m' "$*"; }
+else
+  _cwt_red()     { printf '%s' "$*"; }
+  _cwt_green()   { printf '%s' "$*"; }
+  _cwt_yellow()  { printf '%s' "$*"; }
+  _cwt_blue()    { printf '%s' "$*"; }
+  _cwt_cyan()    { printf '%s' "$*"; }
+  _cwt_dim()     { printf '%s' "$*"; }
+  _cwt_bold()    { printf '%s' "$*"; }
+fi
 
 # ── Logging helpers ─────────────────────────────────────────────────────────
 
@@ -58,7 +69,7 @@ _cwt_relative_time() {
 _cwt_require_git() {
   _cwt_git_root=$(git rev-parse --show-toplevel 2>/dev/null)
   if [[ $? -ne 0 ]]; then
-    _cwt_log_error "Not inside a git repository."
+    _cwt_log_error "Not inside a git repository. Run cwt from within a git project."
     return 1
   fi
   _cwt_worktrees_dir="${_cwt_git_root}/.claude/worktrees"
@@ -153,11 +164,21 @@ EOF
     fi
   fi
 
-  # 3) Branch name (auto-generated)
+  # 3) Branch name (auto-generated, with collision check)
   local branch_name="${positional[3]}"
   if [[ -z "$branch_name" ]]; then
-    local rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
-    branch_name="wt/${name}-${rand}"
+    local rand branch_name
+    local attempts=0
+    while (( attempts < 5 )); do
+      rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
+      branch_name="wt/${name}-${rand}"
+      git -C "$_cwt_git_root" rev-parse --verify "refs/heads/$branch_name" &>/dev/null || break
+      ((attempts++))
+    done
+    if (( attempts >= 5 )); then
+      _cwt_log_error "Could not generate a unique branch name. Specify one manually."
+      return 1
+    fi
   fi
 
   # 4) Create worktree
@@ -184,7 +205,7 @@ EOF
         local rel="${src#${_cwt_git_root}/}"
         local dst="${worktree_path}/${rel}"
         mkdir -p "$(dirname "$dst")"
-        cp "$src" "$dst"
+        cp -r "$src" "$dst"
         _cwt_log_item "$rel"
       done
     done < "$include_file"
@@ -202,14 +223,15 @@ EOF
   echo "  $(_cwt_dim '└──────────────────────────────────────────────')"
   echo ""
 
-  # 7) Launch Claude (unless --no-claude)
+  # 7) Enter worktree and optionally launch Claude
+  pushd "$worktree_path" > /dev/null
   if [[ $no_claude -eq 0 ]]; then
     _cwt_log_info "Launching Claude Code..."
-    cd "$worktree_path" && claude
+    claude
   else
-    _cwt_log_info "Entering worktree directory..."
-    cd "$worktree_path"
+    _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
   fi
+  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -256,9 +278,10 @@ EOF
     local relative_time=""
     [[ -n "$commit_ts" ]] && relative_time=$(_cwt_relative_time "$commit_ts")
 
-    # Check dirty status
+    # Check dirty status (staged, unstaged, and untracked files)
     local status_label
-    if git -C "$d" diff --quiet 2>/dev/null && git -C "$d" diff --cached --quiet 2>/dev/null; then
+    local has_untracked=$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null | head -1)
+    if git -C "$d" diff --quiet 2>/dev/null && git -C "$d" diff --cached --quiet 2>/dev/null && [[ -z "$has_untracked" ]]; then
       status_label="$(_cwt_green 'clean')"
     else
       status_label="$(_cwt_yellow 'dirty')"
@@ -408,39 +431,174 @@ EOF
     echo ""
     _cwt_log_warn "This will remove:"
     _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
-    [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch")"
+    [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
     _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
     echo ""
     echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): "
     read confirm
-    if [[ "$confirm" != y && "$confirm" != Y ]]; then
+    if [[ "$confirm" != [yY] ]]; then
       _cwt_log_warn "Cancelled."
       return 0
     fi
   fi
 
-  # Remove
+  # Remove worktree
   _cwt_log_info "Removing worktree $(_cwt_bold "$selected")..."
 
-  git worktree remove "$worktree_path" 2>&1
+  local rm_output
+  rm_output=$(git worktree remove "$worktree_path" 2>&1)
   if [[ $? -ne 0 ]]; then
-    _cwt_log_warn "Trying force removal..."
-    git worktree remove --force "$worktree_path" 2>&1
-    if [[ $? -ne 0 ]]; then
-      _cwt_log_error "Failed to remove worktree."
-      return 1
+    if [[ $force -eq 1 ]]; then
+      git worktree remove --force "$worktree_path" 2>&1
+      if [[ $? -ne 0 ]]; then
+        _cwt_log_error "Failed to remove worktree."
+        return 1
+      fi
+    else
+      _cwt_log_warn "Worktree has uncommitted changes."
+      echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): "
+      read force_confirm
+      if [[ "$force_confirm" == [yY] ]]; then
+        git worktree remove --force "$worktree_path" 2>&1
+        if [[ $? -ne 0 ]]; then
+          _cwt_log_error "Failed to force remove worktree."
+          return 1
+        fi
+      else
+        _cwt_log_warn "Cancelled. Commit or stash your changes first."
+        return 0
+      fi
     fi
   fi
 
-  # Clean up the branch if it still exists
+  # Safe branch cleanup: try -d first, ask before -D
   if [[ -n "$branch" ]]; then
-    git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null
+    local branch_err
+    branch_err=$(git -C "$_cwt_git_root" branch -d "$branch" 2>&1)
     if [[ $? -eq 0 ]]; then
       _cwt_log_success "Branch $(_cwt_bold "$branch") deleted."
+    elif [[ $force -eq 1 ]]; then
+      git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null && \
+        _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+    else
+      _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
+      echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): "
+      read branch_confirm
+      if [[ "$branch_confirm" == [yY] ]]; then
+        git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null && \
+          _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+      else
+        _cwt_log_info "Branch $(_cwt_bold "$branch") kept."
+      fi
     fi
   fi
 
   _cwt_log_success "Worktree $(_cwt_bold "$selected") removed."
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Subcommand: cwt cd
+# ═══════════════════════════════════════════════════════════════════════════
+
+_cwt_cd() {
+  for arg in "$@"; do
+    case "$arg" in
+      --help|-h)
+        cat <<EOF
+$(_cwt_bold 'cwt cd') - Enter an existing worktree
+
+$(_cwt_bold 'USAGE')
+  cwt cd [name]
+
+$(_cwt_bold 'ARGUMENTS')
+  name    Worktree to enter (prompted if omitted)
+
+$(_cwt_bold 'OPTIONS')
+  -h, --help       Show this help
+  --claude         Also launch Claude Code
+
+$(_cwt_bold 'EXAMPLES')
+  cwt cd fix-auth            # Enter worktree directory
+  cwt cd fix-auth --claude   # Enter and launch Claude
+  cwt cd                     # Interactive selection
+EOF
+        return 0 ;;
+    esac
+  done
+
+  if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    return 0
+  fi
+
+  local launch_claude=0
+  local positional=()
+
+  for arg in "$@"; do
+    case "$arg" in
+      --claude) launch_claude=1 ;;
+      -*) ;;
+      *)  positional+=("$arg") ;;
+    esac
+  done
+
+  # Collect names
+  local names=()
+  for d in "${_cwt_worktrees_dir}"/*/(N); do
+    [[ -d "$d" ]] && names+=("${d:t}")
+  done
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    return 0
+  fi
+
+  local selected="${positional[1]}"
+
+  if [[ -n "$selected" ]]; then
+    local found=0
+    for n in "${names[@]}"; do [[ "$n" == "$selected" ]] && found=1 && break; done
+    if [[ $found -eq 0 ]]; then
+      _cwt_log_error "Not found: $(_cwt_bold "$selected")"
+      _cwt_log_info "Available: ${names[*]}"
+      return 1
+    fi
+  else
+    if command -v fzf &>/dev/null; then
+      selected=$(printf '%s\n' "${names[@]}" | fzf \
+        --prompt="Enter worktree > " \
+        --height=40% --border \
+        --header="ESC: cancel  Enter: select")
+    else
+      echo ""
+      _cwt_log_info "Select worktree:"
+      local i=1
+      for n in "${names[@]}"; do
+        echo "   $(_cwt_dim "$i)") $n"
+        ((i++))
+      done
+      echo -n "$(_cwt_cyan '?') Choice: "
+      read num
+      if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#names[@]} )); then
+        selected="${names[$num]}"
+      else
+        _cwt_log_error "Invalid selection."; return 1
+      fi
+    fi
+  fi
+
+  [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
+
+  local wt_path="${_cwt_worktrees_dir}/${selected}"
+  pushd "$wt_path" > /dev/null
+  _cwt_log_success "Entered $(_cwt_bold "$selected")"
+
+  if [[ $launch_claude -eq 1 ]]; then
+    _cwt_log_info "Launching Claude Code..."
+    claude
+  fi
+
+  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -461,6 +619,7 @@ $(_cwt_bold 'USAGE')
 $(_cwt_bold 'COMMANDS')
   new    Create a new worktree and launch Claude Code
   ls     List all worktrees with status
+  cd     Enter an existing worktree
   rm     Remove a worktree
 
 $(_cwt_bold 'OPTIONS')
@@ -472,8 +631,10 @@ $(_cwt_bold 'EXAMPLES')
   cwt new fix-auth main      # Create based on main branch
   cwt new --no-claude task   # Create without launching Claude
   cwt ls                     # List all worktrees
-  cwt rm fix-auth            # Remove worktree "fix-auth"
-  cwt rm -f fix-auth         # Force remove (skip confirmation)
+  cwt cd fix-auth             # Enter existing worktree
+  cwt cd fix-auth --claude    # Enter and launch Claude
+  cwt rm fix-auth             # Remove worktree "fix-auth"
+  cwt rm -f fix-auth          # Force remove (skip confirmation)
 
 $(_cwt_bold 'DEPENDENCIES')
   Required: git, zsh
@@ -485,7 +646,7 @@ EOF
       echo "cwt $CWT_VERSION"
       return 0
       ;;
-    new|ls|rm)
+    new|ls|cd|rm)
       _cwt_require_git || return 1
       shift
       "_cwt_${subcmd}" "$@"

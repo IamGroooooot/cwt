@@ -47,6 +47,7 @@ cwt <command> [options]
 Commands:
   new    Create a new worktree and launch Claude Code
   ls     List all worktrees with status
+  cd     Enter an existing worktree
   rm     Remove a worktree
 ```
 
@@ -68,6 +69,14 @@ cwt ls
 ```
 
 Shows each worktree with branch name, clean/dirty status, last commit, and relative time.
+
+### Enter a worktree
+
+```sh
+cwt cd fix-auth            # enter worktree directory
+cwt cd fix-auth --claude   # enter and launch Claude Code
+cwt cd                     # interactive selection
+```
 
 ### Remove a worktree
 
