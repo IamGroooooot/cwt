@@ -1,53 +1,114 @@
-# cwt - Claude Worktree Manager
+# cwt
 
-Git worktree를 인터랙티브하게 생성/관리하는 zsh 함수 모음.
-워크트리 생성 후 자동으로 `claude`를 실행한다.
+**Claude Worktree Manager** — Create isolated git worktrees and launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in one command.
 
-## 설치
+```
+cwt new fix-auth main
+```
+
+Creates a worktree, checks out a new branch, copies config files, and drops you into a Claude Code session — all in seconds.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | sh
+```
+
+Or manually:
+
+```sh
+git clone --depth 1 https://github.com/IamGroooooot/cwt.git ~/.cwt
+echo '[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+<details>
+<summary>Plugin managers (zinit, antigen, oh-my-zsh)</summary>
 
 ```zsh
-# .zshrc에 추가
-fpath=(~/.zfunc $fpath)
-autoload -Uz cwt cwt-rm cwt-ls _cwt_init
+# zinit
+zinit light IamGroooooot/cwt
+
+# antigen
+antigen bundle IamGroooooot/cwt
+
+# oh-my-zsh
+git clone https://github.com/IamGroooooot/cwt.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/cwt
+# then add 'cwt' to plugins=(...) in .zshrc
 ```
 
-## 명령어
+</details>
 
-| 명령어 | 설명 |
-|--------|------|
-| `cwt [name] [base] [branch]` | 워크트리 생성 |
-| `cwt-rm` | 워크트리 선택 후 제거 |
-| `cwt-ls` | 워크트리 목록 + 브랜치/최근 커밋 표시 |
-
-## 사용 예시
-
-```zsh
-# 인터랙티브 (fzf로 브랜치 선택)
-cwt my-feature
-
-# 전부 지정
-cwt my-feature main feat/my-feature
-
-# 목록 확인
-cwt-ls
-
-# 제거
-cwt-rm
-```
-
-## .worktreeinclude
-
-프로젝트 루트에 `.worktreeinclude` 파일을 두면, 워크트리 생성 시 지정한 파일을 자동 복사한다.
+## Usage
 
 ```
-# .worktreeinclude 예시
+cwt <command> [options]
+
+Commands:
+  new    Create a new worktree and launch Claude Code
+  ls     List all worktrees with status
+  rm     Remove a worktree
+```
+
+### Create a worktree
+
+```sh
+cwt new fix-auth                # pick base branch interactively
+cwt new fix-auth main           # base off main
+cwt new fix-auth main feat/x    # explicit branch name
+cwt new --no-claude my-task     # skip Claude Code launch
+```
+
+If [fzf](https://github.com/junegunn/fzf) is installed, branch selection becomes interactive. Otherwise, a numbered list is shown.
+
+### List worktrees
+
+```sh
+cwt ls
+```
+
+Shows each worktree with branch name, clean/dirty status, last commit, and relative time.
+
+### Remove a worktree
+
+```sh
+cwt rm fix-auth        # confirm before removing
+cwt rm -f fix-auth     # skip confirmation
+cwt rm                 # interactive selection
+```
+
+Removes the worktree directory and its associated branch.
+
+## `.worktreeinclude`
+
+Place a `.worktreeinclude` file in your project root to auto-copy files into new worktrees:
+
+```
+# .worktreeinclude
 .env
 .env.local
 config/*.secret.json
 ```
 
-## 의존성
+## How it works
 
-- **필수**: git, zsh
-- **권장**: [fzf](https://github.com/junegunn/fzf) (인터랙티브 선택)
-- **선택**: [claude](https://claude.ai/claude-code) (워크트리 생성 후 자동 실행)
+Worktrees are created under `<project>/.claude/worktrees/<name>`. Each gets a new branch (`wt/<name>-<rand>` by default) and optionally copies files listed in `.worktreeinclude`. After setup, `claude` is launched in the worktree directory.
+
+## Requirements
+
+- **zsh** (macOS default)
+- **git** 2.15+
+- **fzf** *(optional, for interactive selection)*
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** *(optional, auto-launched unless `--no-claude`)*
+
+## Uninstall
+
+```sh
+~/.cwt/uninstall.sh
+```
+
+Or manually: remove `~/.cwt/` and the source line from `.zshrc`.
+
+## License
+
+[MIT](LICENSE)
