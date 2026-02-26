@@ -103,6 +103,89 @@ teardown() {
   [[ "$output" == *"CODEX_OK"* ]]
 }
 
+@test "cwt cd: explicit --split fails outside tmux/zellij" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch split-fail HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd split-fail --assistant codex --split
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"requires tmux or zellij"* ]]
+}
+
+@test "cwt cd: --tab launches in tmux window when inside tmux" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch tmux-tab HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export TMUX='test-session'
+    export CWT_TEST_TMUX_LOG='$TEST_TMPDIR/tmux-cd.log'
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/tmux' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_TMUX_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/tmux'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd tmux-tab --assistant codex --tab
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Opened codex in tmux window"* ]]
+  run grep -q "new-window" "$TEST_TMPDIR/tmux-cd.log"
+  [ "$status" -eq 0 ]
+}
+
+@test "cwt cd: --tab launches in zellij tab when inside zellij" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch zellij-tab HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export ZELLIJ='test-session'
+    export CWT_TEST_ZELLIJ_LOG='$TEST_TMPDIR/zellij-cd.log'
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/zellij' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_ZELLIJ_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/zellij'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd zellij-tab --assistant codex --tab
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Opened codex in zellij tab"* ]]
+  run grep -q "action go-to-tab-name" "$TEST_TMPDIR/zellij-cd.log"
+  [ "$status" -eq 0 ]
+  run grep -q "action new-pane --cwd" "$TEST_TMPDIR/zellij-cd.log"
+  [ "$status" -eq 0 ]
+}
+
 @test "cwt cd: unknown assistant returns error" {
   zsh -c "
     export NO_COLOR=1
@@ -183,6 +266,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"USAGE"* ]]
   [[ "$output" == *"--assistant"* ]]
+  [[ "$output" == *"--launch-target"* ]]
+  [[ "$output" == *"--current"* ]]
   [[ "$output" == *"--codex"* ]]
   [[ "$output" == *"--claude"* ]]
 }

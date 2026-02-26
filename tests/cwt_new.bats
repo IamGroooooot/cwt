@@ -108,6 +108,94 @@ teardown() {
   [[ "$output" == *"CODEX_OK"* ]]
 }
 
+@test "cwt new: explicit assistant launch overrides CWT_AUTO_LAUNCH=false" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_AUTO_LAUNCH=false
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new launch-override HEAD --assistant codex
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Launching codex"* ]]
+  [[ "$output" == *"CODEX_OK"* ]]
+}
+
+@test "cwt new: explicit --split fails outside tmux/zellij" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new split-no-mux HEAD --assistant codex --split
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"requires tmux or zellij"* ]]
+}
+
+@test "cwt new: config launch target falls back to current shell when no mux" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_LAUNCH_TARGET=split
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new split-fallback HEAD --assistant codex
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No tmux/zellij session detected"* ]]
+  [[ "$output" == *"CODEX_OK"* ]]
+}
+
+@test "cwt new: --split launches in tmux pane when inside tmux" {
+  run zsh -c "
+    export NO_COLOR=1
+    export TMUX='test-session'
+    export CWT_TEST_TMUX_LOG='$TEST_TMPDIR/tmux.log'
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/tmux' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_TMUX_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/tmux'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new split-tmux HEAD --assistant codex --split
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Opened codex in tmux split"* ]]
+  run grep -q "split-window" "$TEST_TMPDIR/tmux.log"
+  [ "$status" -eq 0 ]
+}
+
+@test "cwt new: --split launches in zellij pane when inside zellij" {
+  run zsh -c "
+    export NO_COLOR=1
+    export ZELLIJ='test-session'
+    export CWT_TEST_ZELLIJ_LOG='$TEST_TMPDIR/zellij.log'
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/zellij' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_ZELLIJ_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/zellij'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new split-zellij HEAD --assistant codex --split
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Opened codex in zellij split"* ]]
+  run grep -q "action new-pane -d right --cwd" "$TEST_TMPDIR/zellij.log"
+  [ "$status" -eq 0 ]
+}
+
 @test "cwt new: assistant launch failure returns non-zero" {
   run zsh -c "
     export NO_COLOR=1
@@ -189,5 +277,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"USAGE"* ]]
   [[ "$output" == *"--assistant"* ]]
+  [[ "$output" == *"--launch-target"* ]]
+  [[ "$output" == *"--current"* ]]
+  [[ "$output" == *"--split"* ]]
   [[ "$output" == *"--no-launch"* ]]
 }

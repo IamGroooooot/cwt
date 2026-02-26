@@ -135,6 +135,36 @@ _cwt_assistant_default_candidates() {
   esac
 }
 
+_cwt_default_launch_target() {
+  echo "${${CWT_LAUNCH_TARGET:-current}:l}"
+}
+
+_cwt_is_valid_launch_target() {
+  case "${1:l}" in
+    current|split|tab) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_cwt_active_multiplexer() {
+  if [[ -n "$TMUX" ]] && command -v tmux >/dev/null 2>&1; then
+    echo "tmux"
+    return 0
+  fi
+
+  if [[ -n "$ZELLIJ" ]] && command -v zellij >/dev/null 2>&1; then
+    echo "zellij"
+    return 0
+  fi
+
+  echo "none"
+}
+
+_cwt_shell_join_quoted() {
+  local -a argv=("$@")
+  echo "${(j: :)${(q)argv}}"
+}
+
 _cwt_command_exists() {
   local command_line="$1"
   local -a parts
@@ -179,11 +209,71 @@ _cwt_resolve_assistant_cmd() {
 
 _cwt_launch_assistant() {
   local assistant="${1:l}"
+  local launch_target="${2:l}"
+  local launch_target_explicit="${3:-0}"
+  [[ -z "$launch_target" ]] && launch_target="current"
+
+  if ! _cwt_is_valid_launch_target "$launch_target"; then
+    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
+    _cwt_log_info "Use one of: current split tab"
+    return 1
+  fi
+
   local command_line
   command_line=$(_cwt_resolve_assistant_cmd "$assistant") || return 1
 
   local -a command_parts
   command_parts=(${(z)command_line})
+
+  if [[ "$launch_target" != "current" ]]; then
+    local mux
+    mux=$(_cwt_active_multiplexer)
+    if [[ "$mux" == "none" ]]; then
+      if [[ "$launch_target_explicit" == "1" ]]; then
+        _cwt_log_error "Launch target '$launch_target' requires tmux or zellij."
+        _cwt_log_item "Run inside tmux/zellij, or use $(_cwt_bold '--current')."
+        return 1
+      fi
+      _cwt_log_warn "No tmux/zellij session detected. Launching in current shell."
+    else
+      local target_label="$launch_target"
+      [[ "$mux" == "tmux" && "$launch_target" == "tab" ]] && target_label="window"
+
+      local command_text
+      command_text=$(_cwt_shell_join_quoted "${command_parts[@]}")
+
+      _cwt_log_info "Launching $(_cwt_bold "$assistant") in $(_cwt_bold "$mux") $(_cwt_bold "$target_label")..."
+      case "$mux:$launch_target" in
+        tmux:split)
+          tmux split-window -c "$PWD" "$command_text"
+          ;;
+        tmux:tab)
+          tmux new-window -c "$PWD" "$command_text"
+          ;;
+        zellij:split)
+          zellij action new-pane -d right --cwd "$PWD" -- "${command_parts[@]}"
+          ;;
+        zellij:tab)
+          local tab_name="cwt-${assistant}-${EPOCHSECONDS}"
+          zellij action go-to-tab-name "$tab_name" --create >/dev/null 2>&1 || \
+            zellij action new-tab --name "$tab_name" --cwd "$PWD"
+          zellij action new-pane --cwd "$PWD" -- "${command_parts[@]}"
+          ;;
+        *)
+          _cwt_log_error "Unsupported launch mode for environment."
+          return 1
+          ;;
+      esac
+
+      local mux_status=$?
+      if [[ $mux_status -ne 0 ]]; then
+        _cwt_log_error "Failed to launch $assistant in $mux $target_label."
+        return $mux_status
+      fi
+      _cwt_log_success "Opened $(_cwt_bold "$assistant") in $(_cwt_bold "$mux") $(_cwt_bold "$target_label")."
+      return 0
+    fi
+  fi
 
   _cwt_log_info "Launching $(_cwt_bold "$assistant")..."
   "${command_parts[@]}"
@@ -239,6 +329,8 @@ _cwt_new() {
   local no_launch=0
   [[ "${CWT_AUTO_LAUNCH:-true}" == "false" ]] && no_launch=1
   local assistant="$(_cwt_default_assistant)"
+  local launch_target="$(_cwt_default_launch_target)"
+  local launch_target_explicit=0
   local positional=()
 
   while [[ $# -gt 0 ]]; do
@@ -262,6 +354,10 @@ $(_cwt_bold 'OPTIONS')
   --claude         Shortcut for --assistant claude
   --codex          Shortcut for --assistant codex
   --gemini         Shortcut for --assistant gemini
+  --launch-target  Launch target ($(_cwt_bold 'current|split|tab'))
+  --current        Shortcut for --launch-target current
+  --split          Shortcut for --launch-target split
+  --tab            Shortcut for --launch-target tab ($(_cwt_dim 'tmux window / zellij tab'))
   --no-launch      Skip assistant launch after creation
 
 $(_cwt_bold 'EXAMPLES')
@@ -270,6 +366,8 @@ $(_cwt_bold 'EXAMPLES')
   cwt new fix-auth main feat/auth               # Explicit branch name
   cwt new fix-auth --assistant codex            # Launch codex in the new worktree
   cwt new fix-auth --gemini                     # Launch gemini in the new worktree
+  cwt new fix-auth --assistant codex --split    # Launch codex in a split pane (tmux/zellij)
+  cwt new fix-auth --assistant codex --tab      # Launch codex in a new tab (tmux/zellij)
   cwt new fix-auth --no-launch                  # Create without launching an assistant
 EOF
         return 0
@@ -285,14 +383,52 @@ EOF
           return 1
         fi
         assistant="${2:l}"
+        no_launch=0
         shift 2
         ;;
       --assistant=*)
         assistant="${${arg#--assistant=}:l}"
+        no_launch=0
         shift
         ;;
       --claude|--codex|--gemini)
         assistant="${arg#--}"
+        no_launch=0
+        shift
+        ;;
+      --launch-target)
+        if [[ $# -lt 2 ]]; then
+          _cwt_log_error "Missing value for $(_cwt_bold '--launch-target')."
+          echo "  Use one of: current, split, tab" >&2
+          return 1
+        fi
+        launch_target="${2:l}"
+        launch_target_explicit=1
+        no_launch=0
+        shift 2
+        ;;
+      --launch-target=*)
+        launch_target="${${arg#--launch-target=}:l}"
+        launch_target_explicit=1
+        no_launch=0
+        shift
+        ;;
+      --current)
+        launch_target="current"
+        launch_target_explicit=1
+        no_launch=0
+        shift
+        ;;
+      --split)
+        launch_target="split"
+        launch_target_explicit=1
+        no_launch=0
+        shift
+        ;;
+      --tab)
+        launch_target="tab"
+        launch_target_explicit=1
+        no_launch=0
         shift
         ;;
       -*)
@@ -313,12 +449,18 @@ EOF
     return 1
   fi
 
+  if ! _cwt_is_valid_launch_target "$launch_target"; then
+    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
+    _cwt_log_info "Use one of: current split tab"
+    return 1
+  fi
+
   # 1) Worktree name
   local name="${positional[1]}"
   if [[ -z "$name" ]]; then
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--no-launch]" >&2
+      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--launch-target <target>|--current|--split|--tab] [--no-launch]" >&2
       return 1
     fi
     echo -n "$(_cwt_cyan '?') Worktree name: " >&2
@@ -447,7 +589,7 @@ EOF
   # 7) Enter worktree and optionally launch an assistant
   pushd "$worktree_path" > /dev/null
   if [[ $no_launch -eq 0 ]]; then
-    _cwt_launch_assistant "$assistant" || return $?
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
   else
     _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
   fi
@@ -770,6 +912,8 @@ EOF
 _cwt_cd() {
   local launch_assistant=0
   local assistant="$(_cwt_default_assistant)"
+  local launch_target="$(_cwt_default_launch_target)"
+  local launch_target_explicit=0
   local positional=()
 
   while [[ $# -gt 0 ]]; do
@@ -791,11 +935,17 @@ $(_cwt_bold 'OPTIONS')
   --claude         Shortcut for --assistant claude
   --codex          Shortcut for --assistant codex
   --gemini         Shortcut for --assistant gemini
+  --launch-target  Launch target ($(_cwt_bold 'current|split|tab'))
+  --current        Shortcut for --launch-target current
+  --split          Shortcut for --launch-target split
+  --tab            Shortcut for --launch-target tab ($(_cwt_dim 'tmux window / zellij tab'))
 
 $(_cwt_bold 'EXAMPLES')
   cwt cd fix-auth                       # Enter worktree directory
   cwt cd fix-auth --assistant codex     # Enter and launch codex
   cwt cd fix-auth --gemini              # Enter and launch gemini
+  cwt cd fix-auth --assistant codex --split
+  cwt cd fix-auth --assistant codex --tab
   cwt cd                                # Main repo: interactive selection, worktree: return to main
 EOF
         return 0 ;;
@@ -819,6 +969,41 @@ EOF
         launch_assistant=1
         shift
         ;;
+      --launch-target)
+        if [[ $# -lt 2 ]]; then
+          _cwt_log_error "Missing value for $(_cwt_bold '--launch-target')."
+          echo "  Use one of: current, split, tab" >&2
+          return 1
+        fi
+        launch_target="${2:l}"
+        launch_target_explicit=1
+        launch_assistant=1
+        shift 2
+        ;;
+      --launch-target=*)
+        launch_target="${${arg#--launch-target=}:l}"
+        launch_target_explicit=1
+        launch_assistant=1
+        shift
+        ;;
+      --current)
+        launch_target="current"
+        launch_target_explicit=1
+        launch_assistant=1
+        shift
+        ;;
+      --split)
+        launch_target="split"
+        launch_target_explicit=1
+        launch_assistant=1
+        shift
+        ;;
+      --tab)
+        launch_target="tab"
+        launch_target_explicit=1
+        launch_assistant=1
+        shift
+        ;;
       -*)
         _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
         echo "  Run $(_cwt_bold 'cwt cd --help') for usage." >&2
@@ -834,6 +1019,12 @@ EOF
   if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_assistant "$assistant"; then
     _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
     _cwt_log_info "Use one of: claude codex gemini"
+    return 1
+  fi
+
+  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_launch_target "$launch_target"; then
+    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
+    _cwt_log_info "Use one of: current split tab"
     return 1
   fi
 
@@ -865,7 +1056,7 @@ EOF
     fi
 
     if [[ $launch_assistant -eq 1 ]]; then
-      _cwt_launch_assistant "$assistant" || return $?
+      _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
     fi
 
     return 0
@@ -898,7 +1089,7 @@ EOF
   else
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini]" >&2
+      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab]" >&2
       return 1
     fi
     local fzf_status=1
@@ -939,7 +1130,7 @@ EOF
   _cwt_log_success "Entered $(_cwt_bold "$selected")"
 
   if [[ $launch_assistant -eq 1 ]]; then
-    _cwt_launch_assistant "$assistant" || return $?
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
   fi
 
   _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
@@ -1040,10 +1231,12 @@ $(_cwt_bold 'EXAMPLES')
   cwt new fix-auth                          # Create worktree "fix-auth"
   cwt new fix-auth main                     # Create based on main branch
   cwt new fix-auth --assistant codex        # Launch codex after create
+  cwt new fix-auth --assistant codex --split  # Launch codex in tmux/zellij split
   cwt new fix-auth --no-launch              # Create without launch
   cwt ls                                    # List all worktrees
   cwt cd fix-auth                           # Enter existing worktree
   cwt cd fix-auth --assistant gemini        # Enter and launch gemini
+  cwt cd fix-auth --assistant gemini --tab  # Launch gemini in tmux/zellij tab
   cwt rm fix-auth                           # Remove worktree "fix-auth"
   cwt rm -f fix-auth                        # Force remove (skip confirmation)
   cwt update                                # Update cwt to latest version
@@ -1053,6 +1246,7 @@ $(_cwt_bold 'DEPENDENCIES')
   Required: git, zsh
   Optional: fzf $(_cwt_dim '(interactive branch/worktree selection)')
             claude/codex/gemini $(_cwt_dim '(assistant launch)')
+            tmux/zellij $(_cwt_dim '(split/tab assistant launch target)')
 EOF
         return 0
         ;;

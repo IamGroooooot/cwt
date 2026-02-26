@@ -55,6 +55,10 @@
   compadd -X "assistants" claude codex gemini
 }
 
+(( $+functions[_cwt_launch_targets] )) || _cwt_launch_targets() {
+  compadd -X "launch targets" current split tab
+}
+
 _cwt_new() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
@@ -62,6 +66,10 @@ _cwt_new() {
     '--claude[Shortcut for --assistant claude]' \
     '--codex[Shortcut for --assistant codex]' \
     '--gemini[Shortcut for --assistant gemini]' \
+    '--launch-target[Assistant launch target]:target:_cwt_launch_targets' \
+    '--current[Shortcut for --launch-target current]' \
+    '--split[Shortcut for --launch-target split]' \
+    '--tab[Shortcut for --launch-target tab]' \
     '--no-launch[Skip assistant launch after creation]' \
     ':name:' \
     ':base-branch:_cwt_branches' \
@@ -80,6 +88,10 @@ _cwt_cd() {
     '--claude[Shortcut for --assistant claude]' \
     '--codex[Shortcut for --assistant codex]' \
     '--gemini[Shortcut for --assistant gemini]' \
+    '--launch-target[Assistant launch target]:target:_cwt_launch_targets' \
+    '--current[Shortcut for --launch-target current]' \
+    '--split[Shortcut for --launch-target split]' \
+    '--tab[Shortcut for --launch-target tab]' \
     ':name:_cwt_worktree_names'
 }
 

@@ -61,7 +61,7 @@ The installer automatically sets up zsh tab completion. After installing, you ge
 ```
 cwt <TAB>        → new, ls, cd, rm, update (with descriptions)
 cwt new <TAB>    → suggest worktree name
-cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --no-launch
+cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --launch-target, --current, --split, --tab, --no-launch
 cwt cd <TAB>     → list existing worktree names
 cwt rm <TAB>     → list existing worktree names
 cwt rm --<TAB>   → --help, --force/-f
@@ -93,6 +93,14 @@ Global Options:
   -v, --version    Show version
 ```
 
+### Quick flows
+
+```sh
+cwt new fix-auth --assistant codex               # create + launch in current shell
+cwt new fix-auth --assistant codex --split       # create + launch in split pane (tmux/zellij)
+cwt new fix-auth --no-launch                     # create only
+```
+
 ## Breaking changes
 
 - Default worktree directory is now `<git-root>/.worktrees` (was `.claude/worktrees`).
@@ -108,11 +116,14 @@ cwt new fix-auth main           # base off main
 cwt new fix-auth main feat/x    # explicit branch name
 cwt new fix-auth --assistant codex   # launch codex after create
 cwt new fix-auth --gemini            # launch gemini after create
+cwt new fix-auth --assistant codex --split   # tmux pane / zellij pane
+cwt new fix-auth --assistant codex --tab     # tmux window / zellij tab
 cwt new --no-launch my-task          # skip assistant launch
 ```
 
 If [fzf](https://github.com/junegunn/fzf) is installed, branch selection becomes interactive. Otherwise, a numbered list is shown.
 When the default `.worktrees` directory is used, `cwt new` automatically ensures `.worktrees/` is present in `.gitignore`.
+When `CWT_AUTO_LAUNCH=false`, explicit launch flags (for example `--assistant`, `--split`, `--tab`, `--launch-target`) still launch.
 
 ### List worktrees
 
@@ -134,10 +145,35 @@ cwt ls 2>/dev/null | grep dirty
 cwt cd fix-auth            # enter worktree directory
 cwt cd fix-auth --assistant codex
 cwt cd fix-auth --gemini
+cwt cd fix-auth --assistant codex --split
+cwt cd fix-auth --assistant codex --tab
 cwt cd                     # interactive selection
 ```
 
 When you run `cwt cd` with no name from inside a linked worktree, it moves you back to the main repository and suggests other available worktrees.
+
+### Launch target (tmux/zellij)
+
+Use launch target options when you want assistant sessions in another pane/tab:
+
+```sh
+cwt new fix-auth --assistant codex --launch-target split
+cwt new fix-auth --assistant codex --split
+cwt cd fix-auth --assistant codex --tab
+cwt cd fix-auth --assistant codex --current
+```
+
+- `current` (default): launch in current shell
+- `split`: launch in a new split pane
+- `tab`: launch in a new tab (`tmux` window / `zellij` tab)
+
+Fallback behavior:
+- If launch target is set in config/env and no tmux/zellij session is active, cwt warns and launches in current shell.
+- If `--split`/`--tab`/`--launch-target` is explicitly passed and no tmux/zellij session is active, cwt returns an error.
+
+Launch precedence in `cwt new`:
+- `--assistant`, `--current`, `--split`, `--tab`, and `--launch-target` force launch even when `CWT_AUTO_LAUNCH=false`.
+- If `--no-launch` is passed later in the same command, launch is skipped (last flag wins).
 
 ### Remove a worktree
 
@@ -219,6 +255,10 @@ CWT_DEFAULT_ASSISTANT=claude
 # Set to "false" to skip launching after cwt new by default (same as --no-launch)
 CWT_AUTO_LAUNCH=false
 
+# Default launch target for assistant startup
+# one of: current, split, tab
+CWT_LAUNCH_TARGET=current
+
 # Custom worktree directory (default: <git-root>/.worktrees)
 CWT_WORKTREE_DIR=
 
@@ -243,6 +283,7 @@ Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branc
   - `claude`
   - `codex`
   - `gemini` or `gemini-cli`
+- **tmux or zellij** *(optional, only for `--split`/`--tab`)*
 
 ## Uninstall
 

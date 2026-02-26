@@ -158,6 +158,34 @@ teardown() {
   [[ "$output" == *"status=1"* ]]
 }
 
+@test "_cwt_is_valid_launch_target: accepts supported targets" {
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_is_valid_launch_target current
+    echo \"current=\$?\"
+    _cwt_is_valid_launch_target split
+    echo \"split=\$?\"
+    _cwt_is_valid_launch_target tab
+    echo \"tab=\$?\"
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"current=0"* ]]
+  [[ "$output" == *"split=0"* ]]
+  [[ "$output" == *"tab=0"* ]]
+}
+
+@test "_cwt_is_valid_launch_target: rejects unknown target" {
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_is_valid_launch_target pane
+    echo \"status=\$?\"
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=1"* ]]
+}
+
 @test "_cwt_resolve_assistant_cmd: honors command override" {
   run zsh -c "
     export NO_COLOR=1
