@@ -1179,8 +1179,8 @@ EOF
   done
 
   local cwt_dir="${CWT_DIR:-$HOME/.cwt}"
-  if [[ ! -d "$cwt_dir/.git" ]]; then
-    _cwt_log_error "cwt not installed via git. Cannot update."
+  if ! git -C "$cwt_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    _cwt_log_error "cwt update requires a git-based install. Cannot update."
     return 1
   fi
 
@@ -1192,13 +1192,22 @@ EOF
   local pull_output
   pull_output=$(git -C "$cwt_dir" pull --ff-only 2>&1)
   if [[ $? -ne 0 ]]; then
-    _cwt_log_error "Update failed. Check your network connection."
+    _cwt_log_error "Update failed. See git output below."
     _cwt_log_item "$pull_output"
     return 1
   fi
 
   # Re-source to get new version
-  source "$cwt_dir/cwt.sh"
+  local cwt_file="$cwt_dir/cwt.sh"
+  if [[ ! -f "$cwt_file" ]]; then
+    _cwt_log_error "Update failed. Missing cwt.sh in $(_cwt_bold "$cwt_dir")."
+    return 1
+  fi
+  if ! source "$cwt_file"; then
+    _cwt_log_error "Update applied, but failed to reload cwt.sh."
+    _cwt_log_item "Run: source \"$cwt_file\""
+    return 1
+  fi
   new_commit=$(git -C "$cwt_dir" rev-parse --verify HEAD 2>/dev/null || true)
 
   if [[ -n "$old_commit" && -n "$new_commit" ]]; then

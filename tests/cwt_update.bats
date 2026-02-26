@@ -11,6 +11,25 @@ teardown() {
   teardown
 }
 
+_create_remote_with_version() {
+  local remote_dir="$1"
+  local seed_dir="$2"
+  local version="$3"
+
+  git init --bare "$remote_dir" --quiet
+  git clone "$remote_dir" "$seed_dir" --quiet
+  git -C "$seed_dir" config user.email "test@test.com"
+  git -C "$seed_dir" config user.name "Test"
+  cat > "$seed_dir/cwt.sh" <<EOF
+#!/usr/bin/env zsh
+CWT_VERSION="$version"
+EOF
+  git -C "$seed_dir" add cwt.sh
+  git -C "$seed_dir" commit -m "initial cwt script" --quiet
+  git -C "$seed_dir" push origin HEAD:main --quiet
+  git -C "$remote_dir" symbolic-ref HEAD refs/heads/main
+}
+
 @test "cwt update: unknown flag returns error" {
   run zsh -c "
     export NO_COLOR=1
@@ -23,26 +42,32 @@ teardown() {
   [[ "$output" == *"cwt update --help"* ]]
 }
 
+@test "cwt update: already up to date when commit is unchanged" {
+  local remote_dir="$TEST_TMPDIR/cwt-remote.git"
+  local seed_dir="$TEST_TMPDIR/cwt-seed"
+  local install_dir="$TEST_TMPDIR/cwt-install"
+
+  _create_remote_with_version "$remote_dir" "$seed_dir" "0.2.0"
+  git clone --branch main "$remote_dir" "$install_dir" --quiet
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_DIR='$install_dir'
+    source '$CWT_SH'
+    CWT_VERSION='0.2.0'
+    cwt update
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Already up to date (v0.2.0)."* ]]
+}
+
 @test "cwt update: reports update when commit changes but version stays same" {
   local remote_dir="$TEST_TMPDIR/cwt-remote.git"
   local seed_dir="$TEST_TMPDIR/cwt-seed"
   local install_dir="$TEST_TMPDIR/cwt-install"
   local pusher_dir="$TEST_TMPDIR/cwt-pusher"
 
-  git init --bare "$remote_dir" --quiet
-
-  git clone "$remote_dir" "$seed_dir" --quiet
-  git -C "$seed_dir" config user.email "test@test.com"
-  git -C "$seed_dir" config user.name "Test"
-  cat > "$seed_dir/cwt.sh" <<'EOF'
-#!/usr/bin/env zsh
-CWT_VERSION="0.2.0"
-EOF
-  git -C "$seed_dir" add cwt.sh
-  git -C "$seed_dir" commit -m "initial cwt script" --quiet
-  git -C "$seed_dir" push origin HEAD:main --quiet
-  git -C "$remote_dir" symbolic-ref HEAD refs/heads/main
-
+  _create_remote_with_version "$remote_dir" "$seed_dir" "0.2.0"
   git clone --branch main "$remote_dir" "$install_dir" --quiet
 
   git clone --branch main "$remote_dir" "$pusher_dir" --quiet
@@ -60,9 +85,92 @@ EOF
     export NO_COLOR=1
     export CWT_DIR='$install_dir'
     source '$CWT_SH'
+    CWT_VERSION='0.2.0'
     cwt update
   "
   [ "$status" -eq 0 ]
   [[ "$output" == *"Updated cwt to latest commit (v0.2.0)."* ]]
   [[ "$output" != *"Already up to date"* ]]
+}
+
+@test "cwt update: reports version bump when upstream version changes" {
+  local remote_dir="$TEST_TMPDIR/cwt-remote.git"
+  local seed_dir="$TEST_TMPDIR/cwt-seed"
+  local install_dir="$TEST_TMPDIR/cwt-install"
+  local pusher_dir="$TEST_TMPDIR/cwt-pusher"
+
+  _create_remote_with_version "$remote_dir" "$seed_dir" "0.2.0"
+  git clone --branch main "$remote_dir" "$install_dir" --quiet
+
+  git clone --branch main "$remote_dir" "$pusher_dir" --quiet
+  git -C "$pusher_dir" config user.email "test@test.com"
+  git -C "$pusher_dir" config user.name "Test"
+  cat > "$pusher_dir/cwt.sh" <<'EOF'
+#!/usr/bin/env zsh
+CWT_VERSION="0.2.1"
+EOF
+  git -C "$pusher_dir" commit -am "bump version" --quiet
+  git -C "$pusher_dir" push origin HEAD:main --quiet
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_DIR='$install_dir'
+    source '$CWT_SH'
+    CWT_VERSION='0.2.0'
+    cwt update
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Updated cwt: 0.2.0 -> 0.2.1"* ]]
+}
+
+@test "cwt update: supports git installs when .git is a file" {
+  local remote_dir="$TEST_TMPDIR/cwt-remote.git"
+  local seed_dir="$TEST_TMPDIR/cwt-seed"
+  local install_dir="$TEST_TMPDIR/cwt-install"
+  local separate_git_dir="$TEST_TMPDIR/cwt-install.gitdir"
+
+  _create_remote_with_version "$remote_dir" "$seed_dir" "0.2.0"
+  git clone --separate-git-dir "$separate_git_dir" --branch main "$remote_dir" "$install_dir" --quiet
+  [ -f "$install_dir/.git" ]
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_DIR='$install_dir'
+    source '$CWT_SH'
+    CWT_VERSION='0.2.0'
+    cwt update
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Already up to date (v0.2.0)."* ]]
+}
+
+@test "cwt update: fails clearly when updated cwt.sh cannot be sourced" {
+  local remote_dir="$TEST_TMPDIR/cwt-remote.git"
+  local seed_dir="$TEST_TMPDIR/cwt-seed"
+  local install_dir="$TEST_TMPDIR/cwt-install"
+  local pusher_dir="$TEST_TMPDIR/cwt-pusher"
+
+  _create_remote_with_version "$remote_dir" "$seed_dir" "0.2.0"
+  git clone --branch main "$remote_dir" "$install_dir" --quiet
+
+  git clone --branch main "$remote_dir" "$pusher_dir" --quiet
+  git -C "$pusher_dir" config user.email "test@test.com"
+  git -C "$pusher_dir" config user.name "Test"
+  cat > "$pusher_dir/cwt.sh" <<'EOF'
+#!/usr/bin/env zsh
+CWT_VERSION="0.2.1"
+if then
+EOF
+  git -C "$pusher_dir" commit -am "introduce syntax error" --quiet
+  git -C "$pusher_dir" push origin HEAD:main --quiet
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_DIR='$install_dir'
+    source '$CWT_SH'
+    CWT_VERSION='0.2.0'
+    cwt update
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed to reload cwt.sh"* ]]
 }
