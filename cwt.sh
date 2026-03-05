@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.4"
+CWT_VERSION="0.2.5"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -106,6 +106,46 @@ _cwt_require_git() {
   fi
 
   _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.worktrees}"
+}
+
+# Collect cwt-managed worktrees using git metadata instead of path globs.
+# This keeps names intact even when they contain slashes (e.g. feat/aaa).
+typeset -ga _cwt_worktree_names_cache=()
+typeset -ga _cwt_worktree_paths_cache=()
+
+_cwt_collect_managed_worktrees() {
+  _cwt_worktree_names_cache=()
+  _cwt_worktree_paths_cache=()
+
+  [[ -d "$_cwt_worktrees_dir" ]] || return 0
+
+  local managed_root="${_cwt_worktrees_dir:A}"
+  local line wt_path name
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == worktree\ * ]] || continue
+
+    wt_path="${line#worktree }"
+    wt_path="${wt_path:A}"
+    [[ "$wt_path" == "$managed_root/"* ]] || continue
+
+    name="${wt_path#$managed_root/}"
+    [[ -z "$name" ]] && continue
+
+    _cwt_worktree_names_cache+=("$name")
+    _cwt_worktree_paths_cache+=("$wt_path")
+  done < <(git -C "$_cwt_git_root" worktree list --porcelain 2>/dev/null)
+}
+
+_cwt_worktree_path_from_name() {
+  local target_name="$1"
+  local i
+  for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
+    if [[ "${_cwt_worktree_names_cache[$i]}" == "$target_name" ]]; then
+      echo "${_cwt_worktree_paths_cache[$i]}"
+      return 0
+    fi
+  done
+  return 1
 }
 
 _cwt_default_assistant() {
@@ -735,11 +775,13 @@ EOF
 
   local count=0
   local entries=()
+  _cwt_collect_managed_worktrees
+  local wt_name d i
 
-  for d in "${_cwt_worktrees_dir}"/*/(N); do
-    [[ ! -d "$d" ]] && continue
-
-    local wt_name="${d:t}"
+  for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
+    wt_name="${_cwt_worktree_names_cache[$i]}"
+    d="${_cwt_worktree_paths_cache[$i]}"
+    [[ -z "$wt_name" || -z "$d" ]] && continue
     local branch=$(git -C "$d" branch --show-current 2>/dev/null)
     local commit_hash=$(git -C "$d" log -1 --format='%h' 2>/dev/null)
     local commit_msg=$(git -C "$d" log -1 --format='%s' 2>/dev/null)
@@ -853,10 +895,8 @@ EOF
   fi
 
   # Collect worktree names
-  local worktree_names=()
-  for d in "${_cwt_worktrees_dir}"/*/(N); do
-    [[ -d "$d" ]] && worktree_names+=("${d:t}")
-  done
+  _cwt_collect_managed_worktrees
+  local worktree_names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#worktree_names[@]} -eq 0 ]]; then
     if [[ -n "$selected" ]]; then
@@ -920,7 +960,12 @@ EOF
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  local worktree_path="${_cwt_worktrees_dir}/${selected}"
+  local worktree_path
+  worktree_path=$(_cwt_worktree_path_from_name "$selected")
+  if [[ -z "$worktree_path" ]]; then
+    _cwt_log_error "Worktree path not found for: $(_cwt_bold "$selected")"
+    return 1
+  fi
   local branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
 
   # Confirm
@@ -1181,10 +1226,14 @@ EOF
 
     if [[ -d "$_cwt_worktrees_dir" ]]; then
       local recommendations=()
-      for d in "${_cwt_worktrees_dir}"/*/(N); do
-        [[ -d "$d" ]] || continue
+      _cwt_collect_managed_worktrees
+      local d n i
+      for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
+        n="${_cwt_worktree_names_cache[$i]}"
+        d="${_cwt_worktree_paths_cache[$i]}"
+        [[ -z "$n" || -z "$d" ]] && continue
         [[ "${d:A}" == "$current_root" ]] && continue
-        recommendations+=("${d:t}")
+        recommendations+=("$n")
       done
       if [[ ${#recommendations[@]} -gt 0 ]]; then
         _cwt_log_info "You can enter: ${recommendations[*]}"
@@ -1205,10 +1254,8 @@ EOF
   fi
 
   # Collect names
-  local names=()
-  for d in "${_cwt_worktrees_dir}"/*/(N); do
-    [[ -d "$d" ]] && names+=("${d:t}")
-  done
+  _cwt_collect_managed_worktrees
+  local names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#names[@]} -eq 0 ]]; then
     _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
@@ -1262,7 +1309,12 @@ EOF
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  local wt_path="${_cwt_worktrees_dir}/${selected}"
+  local wt_path
+  wt_path=$(_cwt_worktree_path_from_name "$selected")
+  if [[ -z "$wt_path" ]]; then
+    _cwt_log_error "Worktree path not found: $(_cwt_bold "$selected")"
+    return 1
+  fi
   pushd "$wt_path" > /dev/null
   _cwt_log_success "Entered $(_cwt_bold "$selected")"
 

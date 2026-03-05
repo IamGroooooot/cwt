@@ -89,6 +89,29 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
+@test "cwt rm: supports worktree names containing slashes" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch feat/rm-slash HEAD feat/rm-slash-branch
+  " 2>/dev/null
+
+  [ -d "$REPO_DIR/.worktrees/feat/rm-slash" ]
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm -f feat/rm-slash
+  "
+  [ "$status" -eq 0 ]
+  [ ! -d "$REPO_DIR/.worktrees/feat/rm-slash" ]
+
+  run git -C "$REPO_DIR" rev-parse --verify refs/heads/feat/rm-slash-branch
+  [ "$status" -ne 0 ]
+}
+
 @test "cwt rm: named remove without worktrees returns error" {
   run zsh -c "
     export NO_COLOR=1

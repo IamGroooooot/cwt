@@ -20,7 +20,7 @@
   echo "${git_common_dir:A:h}"
 }
 
-# List existing worktree names from .worktrees/*/
+# List existing cwt-managed worktree names.
 (( $+functions[_cwt_worktree_names] )) || _cwt_worktree_names() {
   local git_root wt_dir
   git_root=$(_cwt_repo_root) || return
@@ -33,12 +33,24 @@
 
   [[ -d "$wt_dir" ]] || return
 
+  local managed_root line wt_path
+  managed_root="${wt_dir:A}"
+
   local -a names
-  local d
-  for d in "$wt_dir"/*(N/); do
-    names+=("${d:t}")
-  done
-  (( ${#names} )) && compadd -X "worktrees" -a names
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" == worktree\ * ]] || continue
+
+    wt_path="${line#worktree }"
+    wt_path="${wt_path:A}"
+    [[ "$wt_path" == "$managed_root/"* ]] || continue
+
+    names+=("${wt_path#$managed_root/}")
+  done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null)
+
+  if (( ${#names} > 1 )); then
+    names=(${(on)names})
+  fi
+  (( ${#names} )) && compadd -Q -X "worktrees" -a names
 }
 
 # List git branch names

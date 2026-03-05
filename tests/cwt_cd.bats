@@ -64,6 +64,25 @@ teardown() {
   [[ "$output" == *".worktrees/cd-test"* ]]
 }
 
+@test "cwt cd: supports worktree names containing slashes" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch feat/cd-slash HEAD feat/cd-branch
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd feat/cd-slash
+    pwd
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".worktrees/feat/cd-slash"* ]]
+}
+
 @test "cwt cd: shows success message" {
   zsh -c "
     export NO_COLOR=1

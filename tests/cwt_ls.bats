@@ -38,6 +38,19 @@ teardown() {
   [[ "$output" == *"list-test"* ]]
 }
 
+@test "cwt ls: preserves slash in worktree names" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch feat/ls-slash HEAD
+  " 2>/dev/null
+
+  run_cwt_in "$REPO_DIR" "cwt ls"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"feat/ls-slash"* ]]
+}
+
 @test "cwt ls: works from inside a worktree directory" {
   zsh -c "
     export NO_COLOR=1
@@ -73,7 +86,7 @@ teardown() {
   " 2>/dev/null
 
   # Make the worktree dirty
-  echo "modified" > "$REPO_DIR/.worktrees/dirty-test/file.txt"
+  echo "modified" >"$REPO_DIR/.worktrees/dirty-test/file.txt"
 
   run_cwt_in "$REPO_DIR" "cwt ls"
   [ "$status" -eq 0 ]
