@@ -104,6 +104,41 @@ EOF
   [ ! -e "$REPO_DIR/.worktrees/include-ignore/missing.file" ]
 }
 
+@test "cwt new: .worktreeinclude warns and continues for unmatched wildcard" {
+  echo "ok" > "$REPO_DIR/keep-wild.txt"
+  cat > "$REPO_DIR/.worktreeinclude" <<'EOF'
+secrets/*.json
+keep-wild.txt
+EOF
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-wild HEAD
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".worktreeinclude pattern matched nothing: secrets/*.json"* ]]
+  [ -f "$REPO_DIR/.worktrees/include-wild/keep-wild.txt" ]
+}
+
+@test "cwt new: .worktreeinclude accepts CRLF and trimmed entries" {
+  mkdir -p "$REPO_DIR/config"
+  echo "ok" > "$REPO_DIR/.env.local"
+  echo '{"trim":"ok"}' > "$REPO_DIR/config/trim.secret.json"
+  printf '  # comment\r\n  .env.local  \r\n  config/*.secret.json  \r\n' > "$REPO_DIR/.worktreeinclude"
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-crlf HEAD
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_DIR/.worktrees/include-crlf/.env.local" ]
+  [ -f "$REPO_DIR/.worktrees/include-crlf/config/trim.secret.json" ]
+}
+
 @test "cwt new: duplicate name returns error" {
   # Create first worktree
   zsh -c "

@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.6"
+CWT_VERSION="0.2.7"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -756,15 +756,34 @@ EOF
   local include_file="${_cwt_git_root}/.worktreeinclude"
   if [[ -f "$include_file" ]]; then
     _cwt_log_info "Copying files from .worktreeinclude..."
+    local pattern
+    local trimmed_pattern
+    local -a files
+    local src rel dst
+
     while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-      [[ -z "$pattern" || "$pattern" == \#* ]] && continue
-      local files=("${_cwt_git_root}"/${~pattern})
+      # Accept CRLF-formatted include files and ignore leading/trailing spaces.
+      pattern="${pattern%$'\r'}"
+      trimmed_pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+      trimmed_pattern="${trimmed_pattern%"${trimmed_pattern##*[![:space:]]}"}"
+
+      [[ -z "$trimmed_pattern" || "$trimmed_pattern" == \#* ]] && continue
+
+      # (N) keeps unmatched globs from throwing "no matches found".
+      files=( "${_cwt_git_root}"/${~trimmed_pattern}(N) )
+      if (( ${#files[@]} == 0 )); then
+        if [[ "$trimmed_pattern" == *[\*\?\[]* ]]; then
+          _cwt_log_warn ".worktreeinclude pattern matched nothing: $trimmed_pattern"
+        fi
+        continue
+      fi
+
       for src in "${files[@]}"; do
         [[ ! -e "$src" ]] && continue
-        local rel="${src#${_cwt_git_root}/}"
-        local dst="${worktree_path}/${rel}"
-        mkdir -p "$(dirname "$dst")"
-        cp -r "$src" "$dst"
+        rel="${src#${_cwt_git_root}/}"
+        dst="${worktree_path}/${rel}"
+        mkdir -p "$(dirname "$dst")" || return 1
+        cp -R "$src" "$dst" || return 1
         _cwt_log_item "$rel"
       done
     done < "$include_file"
