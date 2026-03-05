@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.5"
+CWT_VERSION="0.2.6"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -146,6 +146,63 @@ _cwt_worktree_path_from_name() {
     fi
   done
   return 1
+}
+
+_cwt_name_in_list() {
+  local target="$1"
+  shift
+
+  local candidate
+  for candidate in "$@"; do
+    [[ "$candidate" == "$target" ]] && return 0
+  done
+  return 1
+}
+
+_cwt_select_worktree_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  shift 2
+  local -a names=("$@")
+
+  local selected=""
+  local fzf_status=1
+  local i
+  local num
+  local name
+
+  if command -v fzf &>/dev/null; then
+    selected=$(printf '%s\n' "${names[@]}" | fzf \
+      --prompt="$fzf_prompt" \
+      --height=40% \
+      --border \
+      --header="ESC: cancel  Enter: select" 2>/dev/null)
+    fzf_status=$?
+    if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
+      selected=""
+      _cwt_log_warn "fzf failed. Falling back to numbered selection."
+    fi
+  fi
+
+  if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
+    echo "" >&2
+    _cwt_log_info "$list_title"
+    i=1
+    for name in "${names[@]}"; do
+      echo "   $(_cwt_dim "$i)") $name" >&2
+      ((i++))
+    done
+    echo -n "$(_cwt_cyan '?') Choice: " >&2
+    read num
+    if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#names[@]} )); then
+      selected="${names[$num]}"
+    else
+      _cwt_log_error "Invalid selection."
+      return 1
+    fi
+  fi
+
+  echo "$selected"
 }
 
 _cwt_default_assistant() {
@@ -908,12 +965,7 @@ EOF
   fi
 
   if [[ -n "$selected" ]]; then
-    # Validate that the given name exists
-    local found=0
-    for wt in "${worktree_names[@]}"; do
-      [[ "$wt" == "$selected" ]] && found=1 && break
-    done
-    if [[ $found -eq 0 ]]; then
+    if ! _cwt_name_in_list "$selected" "${worktree_names[@]}"; then
       _cwt_log_error "Worktree not found: $(_cwt_bold "$selected")"
       _cwt_log_info "Available: ${worktree_names[*]}"
       return 1
@@ -924,38 +976,7 @@ EOF
       echo "  Usage: cwt rm <name> [-f|--force]" >&2
       return 1
     fi
-    # Interactive selection
-    local fzf_status=1
-    if command -v fzf &>/dev/null; then
-      selected=$(printf '%s\n' "${worktree_names[@]}" | fzf \
-        --prompt="Remove worktree > " \
-        --height=40% \
-        --border \
-        --header="ESC: cancel  Enter: select" 2>/dev/null)
-      fzf_status=$?
-      if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
-        selected=""
-        _cwt_log_warn "fzf failed. Falling back to numbered selection."
-      fi
-    fi
-
-    if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
-      echo "" >&2
-      _cwt_log_info "Select worktree to remove:"
-      local i=1
-      for wt_name in "${worktree_names[@]}"; do
-        echo "   $(_cwt_dim "$i)") $wt_name" >&2
-        ((i++))
-      done
-      echo -n "$(_cwt_cyan '?') Choice: " >&2
-      read num
-      if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#worktree_names[@]} )); then
-        selected="${worktree_names[$num]}"
-      else
-        _cwt_log_error "Invalid selection."
-        return 1
-      fi
-    fi
+    selected=$(_cwt_select_worktree_interactive "Remove worktree > " "Select worktree to remove:" "${worktree_names[@]}") || return 1
   fi
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
@@ -1263,9 +1284,7 @@ EOF
   fi
 
   if [[ -n "$selected" ]]; then
-    local found=0
-    for n in "${names[@]}"; do [[ "$n" == "$selected" ]] && found=1 && break; done
-    if [[ $found -eq 0 ]]; then
+    if ! _cwt_name_in_list "$selected" "${names[@]}"; then
       _cwt_log_error "Not found: $(_cwt_bold "$selected")"
       _cwt_log_info "Available: ${names[*]}"
       return 1
@@ -1276,35 +1295,7 @@ EOF
       echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions]" >&2
       return 1
     fi
-    local fzf_status=1
-    if command -v fzf &>/dev/null; then
-      selected=$(printf '%s\n' "${names[@]}" | fzf \
-        --prompt="Enter worktree > " \
-        --height=40% --border \
-        --header="ESC: cancel  Enter: select" 2>/dev/null)
-      fzf_status=$?
-      if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
-        selected=""
-        _cwt_log_warn "fzf failed. Falling back to numbered selection."
-      fi
-    fi
-
-    if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
-      echo "" >&2
-      _cwt_log_info "Select worktree:"
-      local i=1
-      for n in "${names[@]}"; do
-        echo "   $(_cwt_dim "$i)") $n" >&2
-        ((i++))
-      done
-      echo -n "$(_cwt_cyan '?') Choice: " >&2
-      read num
-      if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#names[@]} )); then
-        selected="${names[$num]}"
-      else
-        _cwt_log_error "Invalid selection."; return 1
-      fi
-    fi
+    selected=$(_cwt_select_worktree_interactive "Enter worktree > " "Select worktree:" "${names[@]}") || return 1
   fi
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
