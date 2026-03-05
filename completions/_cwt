@@ -59,7 +59,7 @@
   compadd -X "launch targets" current split tab
 }
 
-_cwt_new() {
+_cwt_complete_new() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
     '--assistant[Assistant to launch]:assistant:_cwt_assistants' \
@@ -76,12 +76,12 @@ _cwt_new() {
     ':branch-name:'
 }
 
-_cwt_ls() {
+_cwt_complete_ls() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]'
 }
 
-_cwt_cd() {
+_cwt_complete_cd() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
     '--assistant[Assistant to launch]:assistant:_cwt_assistants' \
@@ -95,14 +95,14 @@ _cwt_cd() {
     ':name:_cwt_worktree_names'
 }
 
-_cwt_rm() {
+_cwt_complete_rm() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]' \
     '(-f --force)'{-f,--force}'[Skip confirmation prompt]' \
     ':name:_cwt_worktree_names'
 }
 
-_cwt_update() {
+_cwt_complete_update() {
   _arguments -s \
     '(-h --help)'{-h,--help}'[Show help]'
 }
@@ -130,14 +130,12 @@ _cwt() {
       ;;
     args)
       case "$words[1]" in
-        new)    _cwt_new    ;;
-        ls)     _cwt_ls     ;;
-        cd)     _cwt_cd     ;;
-        rm)     _cwt_rm     ;;
-        update) _cwt_update ;;
+        new)    _cwt_complete_new    ;;
+        ls)     _cwt_complete_ls     ;;
+        cd)     _cwt_complete_cd     ;;
+        rm)     _cwt_complete_rm     ;;
+        update) _cwt_complete_update ;;
       esac
       ;;
   esac
 }
-
-_cwt "$@"

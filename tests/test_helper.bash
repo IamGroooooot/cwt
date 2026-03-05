@@ -15,6 +15,9 @@ setup() {
   TEST_TMPDIR="$(mktemp -d)"
   export HOME="$TEST_TMPDIR"
   export XDG_CONFIG_HOME="$TEST_TMPDIR/.config"
+  # Ensure mux-dependent tests are deterministic regardless of host shell.
+  unset TMUX
+  unset ZELLIJ
 }
 
 teardown() {
