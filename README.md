@@ -61,7 +61,7 @@ The installer automatically sets up zsh tab completion. After installing, you ge
 ```
 cwt <TAB>        → new, ls, cd, rm, update (with descriptions)
 cwt new <TAB>    → suggest worktree name
-cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --launch-target, --current, --split, --tab, --no-launch
+cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --launch-target, --current, --split, --tab, --all-permissions, --default-permissions, --yolo, --dangerously-skip-permissions, --no-launch
 cwt cd <TAB>     → list existing worktree names
 cwt rm <TAB>     → list existing worktree names
 cwt rm --<TAB>   → --help, --force/-f
@@ -118,6 +118,9 @@ cwt new fix-auth --assistant codex   # launch codex after create
 cwt new fix-auth --gemini            # launch gemini after create
 cwt new fix-auth --assistant codex --split   # tmux pane / zellij pane
 cwt new fix-auth --assistant codex --tab     # tmux window / zellij tab
+cwt new fix-auth --assistant codex --all-permissions   # codex + --yolo
+cwt new fix-auth --yolo              # shortcut: --assistant codex --all-permissions
+cwt new fix-auth --dangerously-skip-permissions  # shortcut: --assistant claude --all-permissions
 cwt new --no-launch my-task          # skip assistant launch
 ```
 
@@ -147,6 +150,9 @@ cwt cd fix-auth --assistant codex
 cwt cd fix-auth --gemini
 cwt cd fix-auth --assistant codex --split
 cwt cd fix-auth --assistant codex --tab
+cwt cd fix-auth --assistant codex --all-permissions
+cwt cd fix-auth --yolo
+cwt cd fix-auth --dangerously-skip-permissions
 cwt cd                     # interactive selection
 ```
 
@@ -174,6 +180,22 @@ Fallback behavior:
 Launch precedence in `cwt new`:
 - `--assistant`, `--current`, `--split`, `--tab`, and `--launch-target` force launch even when `CWT_AUTO_LAUNCH=false`.
 - If `--no-launch` is passed later in the same command, launch is skipped (last flag wins).
+
+### Full-permission launch mode
+
+Keep default behavior as-is, and opt in only when needed:
+
+```sh
+cwt new fix-auth --assistant codex --all-permissions
+cwt cd fix-auth --assistant claude --all-permissions
+```
+
+- `--all-permissions`: enable full-permission mode
+  - Codex: adds `--yolo`
+  - Claude: adds `--dangerously-skip-permissions`
+- `--default-permissions`: force normal/default mode
+- `--yolo`: shortcut for `--assistant codex --all-permissions`
+- `--dangerously-skip-permissions`: shortcut for `--assistant claude --all-permissions`
 
 ### Remove a worktree
 
@@ -272,6 +294,10 @@ CWT_AUTO_LAUNCH=false
 # Default launch target for assistant startup
 # one of: current, split, tab
 CWT_LAUNCH_TARGET=current
+
+# Default assistant permission mode when launching
+# one of: default, full
+CWT_PERMISSION_MODE=default
 
 # Custom worktree directory (default: <git-root>/.worktrees)
 CWT_WORKTREE_DIR=

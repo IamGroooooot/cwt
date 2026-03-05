@@ -70,6 +70,10 @@ _cwt_complete_new() {
     '--current[Shortcut for --launch-target current]' \
     '--split[Shortcut for --launch-target split]' \
     '--tab[Shortcut for --launch-target tab]' \
+    '--all-permissions[Launch with full permissions for supported assistants]' \
+    '--default-permissions[Use assistant default permission mode]' \
+    '--yolo[Shortcut for --assistant codex --all-permissions]' \
+    '--dangerously-skip-permissions[Shortcut for --assistant claude --all-permissions]' \
     '--no-launch[Skip assistant launch after creation]' \
     ':name:' \
     ':base-branch:_cwt_branches' \
@@ -92,6 +96,10 @@ _cwt_complete_cd() {
     '--current[Shortcut for --launch-target current]' \
     '--split[Shortcut for --launch-target split]' \
     '--tab[Shortcut for --launch-target tab]' \
+    '--all-permissions[Launch with full permissions for supported assistants]' \
+    '--default-permissions[Use assistant default permission mode]' \
+    '--yolo[Shortcut for --assistant codex --all-permissions]' \
+    '--dangerously-skip-permissions[Shortcut for --assistant claude --all-permissions]' \
     ':name:_cwt_worktree_names'
 }
 

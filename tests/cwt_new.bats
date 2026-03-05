@@ -163,6 +163,94 @@ EOF
   [[ "$output" == *"CODEX_OK"* ]]
 }
 
+@test "cwt new: invalid permission mode fails when launch is requested" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_PERMISSION_MODE=invalid
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new invalid-perm-launch HEAD --assistant codex
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown permission mode"* ]]
+}
+
+@test "cwt new: invalid permission mode does not block --no-launch" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_PERMISSION_MODE=invalid
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new invalid-perm-no-launch HEAD --no-launch
+  "
+  [ "$status" -eq 0 ]
+  [ -d "$REPO_DIR/.worktrees/invalid-perm-no-launch" ]
+}
+
+@test "cwt new: --all-permissions adds --yolo for codex" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_TEST_CODEX_LOG='$TEST_TMPDIR/codex-new.log'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/codex' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_CODEX_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/codex'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new full-access-codex HEAD --assistant codex --all-permissions
+  "
+  [ "$status" -eq 0 ]
+  run grep -q -- "--yolo" "$TEST_TMPDIR/codex-new.log"
+  [ "$status" -eq 0 ]
+}
+
+@test "cwt new: --yolo shortcut launches codex with --yolo" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_TEST_CODEX_LOG='$TEST_TMPDIR/codex-shortcut.log'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/codex' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_CODEX_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/codex'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new full-access-shortcut HEAD --yolo
+  "
+  [ "$status" -eq 0 ]
+  run grep -q -- "--yolo" "$TEST_TMPDIR/codex-shortcut.log"
+  [ "$status" -eq 0 ]
+}
+
+@test "cwt new: --dangerously-skip-permissions shortcut launches claude with flag" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_TEST_CLAUDE_LOG='$TEST_TMPDIR/claude-shortcut.log'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/claude' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_CLAUDE_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/claude'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new full-access-claude HEAD --dangerously-skip-permissions
+  "
+  [ "$status" -eq 0 ]
+  run grep -q -- "--dangerously-skip-permissions" "$TEST_TMPDIR/claude-shortcut.log"
+  [ "$status" -eq 0 ]
+}
+
 @test "cwt new: explicit --split fails outside tmux/zellij" {
   run zsh -c "
     export NO_COLOR=1

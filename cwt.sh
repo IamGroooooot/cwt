@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.3"
+CWT_VERSION="0.2.4"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -146,6 +146,40 @@ _cwt_is_valid_launch_target() {
   esac
 }
 
+_cwt_default_permission_mode() {
+  echo "${${CWT_PERMISSION_MODE:-default}:l}"
+}
+
+_cwt_is_valid_permission_mode() {
+  case "${1:l}" in
+    default|full) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_cwt_permission_flag_for_assistant() {
+  local assistant="${1:l}"
+  local mode="${2:l}"
+
+  [[ "$mode" == "full" ]] || return 0
+
+  case "$assistant" in
+    codex) echo "--yolo" ;;
+    claude) echo "--dangerously-skip-permissions" ;;
+    *) echo "" ;;
+  esac
+}
+
+_cwt_command_has_flag() {
+  local flag="$1"
+  shift
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" == "$flag" ]] && return 0
+  done
+  return 1
+}
+
 _cwt_active_multiplexer() {
   if [[ -n "$TMUX" ]] && command -v tmux >/dev/null 2>&1; then
     echo "tmux"
@@ -191,7 +225,9 @@ _cwt_resolve_assistant_cmd() {
     return 1
   fi
 
-  local -a candidates=(${=(_cwt_assistant_default_candidates "$assistant")})
+  local candidates_text
+  candidates_text=$(_cwt_assistant_default_candidates "$assistant")
+  local -a candidates=(${=candidates_text})
   local candidate
   for candidate in "${candidates[@]}"; do
     tried+=("$candidate")
@@ -211,11 +247,19 @@ _cwt_launch_assistant() {
   local assistant="${1:l}"
   local launch_target="${2:l}"
   local launch_target_explicit="${3:-0}"
+  local permission_mode="${4:-default}"
   [[ -z "$launch_target" ]] && launch_target="current"
+  [[ -z "$permission_mode" ]] && permission_mode="default"
 
   if ! _cwt_is_valid_launch_target "$launch_target"; then
     _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
     _cwt_log_info "Use one of: current split tab"
+    return 1
+  fi
+
+  if ! _cwt_is_valid_permission_mode "$permission_mode"; then
+    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
+    _cwt_log_info "Use one of: default full"
     return 1
   fi
 
@@ -224,6 +268,16 @@ _cwt_launch_assistant() {
 
   local -a command_parts
   command_parts=(${(z)command_line})
+
+  local permission_flag
+  permission_flag=$(_cwt_permission_flag_for_assistant "$assistant" "$permission_mode")
+  if [[ -n "$permission_flag" ]] && ! _cwt_command_has_flag "$permission_flag" "${command_parts[@]}"; then
+    command_parts+=("$permission_flag")
+  fi
+
+  if [[ "$permission_mode" == "full" && -z "$permission_flag" ]]; then
+    _cwt_log_warn "Full-permission mode has no built-in flag for $assistant. Launching with default permissions."
+  fi
 
   if [[ "$launch_target" != "current" ]]; then
     local mux
@@ -330,6 +384,7 @@ _cwt_new() {
   [[ "${CWT_AUTO_LAUNCH:-true}" == "false" ]] && no_launch=1
   local assistant="$(_cwt_default_assistant)"
   local launch_target="$(_cwt_default_launch_target)"
+  local permission_mode="$(_cwt_default_permission_mode)"
   local launch_target_explicit=0
   local positional=()
 
@@ -358,6 +413,11 @@ $(_cwt_bold 'OPTIONS')
   --current        Shortcut for --launch-target current
   --split          Shortcut for --launch-target split
   --tab            Shortcut for --launch-target tab ($(_cwt_dim 'tmux window / zellij tab'))
+  --all-permissions  Launch with full permissions (Codex: --yolo, Claude: --dangerously-skip-permissions)
+  --default-permissions  Use assistant default permission mode
+  --yolo           Shortcut for $(_cwt_bold '--assistant codex --all-permissions')
+  --dangerously-skip-permissions
+                   Shortcut for $(_cwt_bold '--assistant claude --all-permissions')
   --no-launch      Skip assistant launch after creation
 
 $(_cwt_bold 'EXAMPLES')
@@ -368,6 +428,9 @@ $(_cwt_bold 'EXAMPLES')
   cwt new fix-auth --gemini                     # Launch gemini in the new worktree
   cwt new fix-auth --assistant codex --split    # Launch codex in a split pane (tmux/zellij)
   cwt new fix-auth --assistant codex --tab      # Launch codex in a new tab (tmux/zellij)
+  cwt new fix-auth --assistant codex --all-permissions  # Launch codex with --yolo
+  cwt new fix-auth --yolo                        # Shortcut: codex + full permissions
+  cwt new fix-auth --dangerously-skip-permissions # Shortcut: claude + full permissions
   cwt new fix-auth --no-launch                  # Create without launching an assistant
 EOF
         return 0
@@ -431,6 +494,27 @@ EOF
         no_launch=0
         shift
         ;;
+      --all-permissions)
+        permission_mode="full"
+        no_launch=0
+        shift
+        ;;
+      --default-permissions)
+        permission_mode="default"
+        shift
+        ;;
+      --yolo)
+        assistant="codex"
+        permission_mode="full"
+        no_launch=0
+        shift
+        ;;
+      --dangerously-skip-permissions)
+        assistant="claude"
+        permission_mode="full"
+        no_launch=0
+        shift
+        ;;
       -*)
         _cwt_log_error "Unknown option for cwt new: $(_cwt_bold "$arg")"
         echo "  Run $(_cwt_bold 'cwt new --help') for usage." >&2
@@ -455,6 +539,12 @@ EOF
     return 1
   fi
 
+  if [[ $no_launch -eq 0 ]] && ! _cwt_is_valid_permission_mode "$permission_mode"; then
+    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
+    _cwt_log_info "Use one of: default full"
+    return 1
+  fi
+
   # Fail fast for explicit split/tab requests before mutating repository state.
   if [[ $no_launch -eq 0 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
     local preflight_mux
@@ -471,7 +561,7 @@ EOF
   if [[ -z "$name" ]]; then
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--launch-target <target>|--current|--split|--tab] [--no-launch]" >&2
+      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions] [--no-launch]" >&2
       return 1
     fi
     echo -n "$(_cwt_cyan '?') Worktree name: " >&2
@@ -600,7 +690,7 @@ EOF
   # 7) Enter worktree and optionally launch an assistant
   pushd "$worktree_path" > /dev/null
   if [[ $no_launch -eq 0 ]]; then
-    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
   else
     _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
   fi
@@ -924,6 +1014,7 @@ _cwt_cd() {
   local launch_assistant=0
   local assistant="$(_cwt_default_assistant)"
   local launch_target="$(_cwt_default_launch_target)"
+  local permission_mode="$(_cwt_default_permission_mode)"
   local launch_target_explicit=0
   local positional=()
 
@@ -950,6 +1041,11 @@ $(_cwt_bold 'OPTIONS')
   --current        Shortcut for --launch-target current
   --split          Shortcut for --launch-target split
   --tab            Shortcut for --launch-target tab ($(_cwt_dim 'tmux window / zellij tab'))
+  --all-permissions  Launch with full permissions (Codex: --yolo, Claude: --dangerously-skip-permissions)
+  --default-permissions  Use assistant default permission mode
+  --yolo           Shortcut for $(_cwt_bold '--assistant codex --all-permissions')
+  --dangerously-skip-permissions
+                   Shortcut for $(_cwt_bold '--assistant claude --all-permissions')
 
 $(_cwt_bold 'EXAMPLES')
   cwt cd fix-auth                       # Enter worktree directory
@@ -957,6 +1053,9 @@ $(_cwt_bold 'EXAMPLES')
   cwt cd fix-auth --gemini              # Enter and launch gemini
   cwt cd fix-auth --assistant codex --split
   cwt cd fix-auth --assistant codex --tab
+  cwt cd fix-auth --assistant codex --all-permissions
+  cwt cd fix-auth --yolo
+  cwt cd fix-auth --dangerously-skip-permissions
   cwt cd                                # Main repo: interactive selection, worktree: return to main
 EOF
         return 0 ;;
@@ -1015,6 +1114,27 @@ EOF
         launch_assistant=1
         shift
         ;;
+      --all-permissions)
+        permission_mode="full"
+        launch_assistant=1
+        shift
+        ;;
+      --default-permissions)
+        permission_mode="default"
+        shift
+        ;;
+      --yolo)
+        assistant="codex"
+        permission_mode="full"
+        launch_assistant=1
+        shift
+        ;;
+      --dangerously-skip-permissions)
+        assistant="claude"
+        permission_mode="full"
+        launch_assistant=1
+        shift
+        ;;
       -*)
         _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
         echo "  Run $(_cwt_bold 'cwt cd --help') for usage." >&2
@@ -1036,6 +1156,12 @@ EOF
   if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_launch_target "$launch_target"; then
     _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
     _cwt_log_info "Use one of: current split tab"
+    return 1
+  fi
+
+  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_permission_mode "$permission_mode"; then
+    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
+    _cwt_log_info "Use one of: default full"
     return 1
   fi
 
@@ -1067,7 +1193,7 @@ EOF
     fi
 
     if [[ $launch_assistant -eq 1 ]]; then
-      _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
+      _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
     fi
 
     return 0
@@ -1100,7 +1226,7 @@ EOF
   else
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab]" >&2
+      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions]" >&2
       return 1
     fi
     local fzf_status=1
@@ -1141,7 +1267,7 @@ EOF
   _cwt_log_success "Entered $(_cwt_bold "$selected")"
 
   if [[ $launch_assistant -eq 1 ]]; then
-    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" || return $?
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
   fi
 
   _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."

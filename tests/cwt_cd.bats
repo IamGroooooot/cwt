@@ -103,6 +103,91 @@ teardown() {
   [[ "$output" == *"CODEX_OK"* ]]
 }
 
+@test "cwt cd: invalid permission mode fails only when launch is requested" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch cd-invalid-perm HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_PERMISSION_MODE=invalid
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd cd-invalid-perm
+  "
+  [ "$status" -eq 0 ]
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_PERMISSION_MODE=invalid
+    export CWT_CMD_CODEX='echo CODEX_OK'
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd cd-invalid-perm --assistant codex
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Unknown permission mode"* ]]
+}
+
+@test "cwt cd: --all-permissions adds --yolo for codex" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch cd-full-codex HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_TEST_CODEX_LOG='$TEST_TMPDIR/codex-cd.log'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/codex' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_CODEX_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/codex'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd cd-full-codex --assistant codex --all-permissions
+  "
+  [ "$status" -eq 0 ]
+  run grep -q -- "--yolo" "$TEST_TMPDIR/codex-cd.log"
+  [ "$status" -eq 0 ]
+}
+
+@test "cwt cd: --dangerously-skip-permissions shortcut launches claude with flag" {
+  zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch cd-full-claude HEAD
+  " 2>/dev/null
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_TEST_CLAUDE_LOG='$TEST_TMPDIR/claude-cd.log'
+    mkdir -p '$TEST_TMPDIR/bin'
+    cat > '$TEST_TMPDIR/bin/claude' <<'EOF'
+#!/usr/bin/env bash
+echo \"\$*\" >> \"\${CWT_TEST_CLAUDE_LOG}\"
+exit 0
+EOF
+    chmod +x '$TEST_TMPDIR/bin/claude'
+    export PATH='$TEST_TMPDIR/bin:'\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt cd cd-full-claude --dangerously-skip-permissions
+  "
+  [ "$status" -eq 0 ]
+  run grep -q -- "--dangerously-skip-permissions" "$TEST_TMPDIR/claude-cd.log"
+  [ "$status" -eq 0 ]
+}
+
 @test "cwt cd: explicit --split fails outside tmux/zellij" {
   zsh -c "
     export NO_COLOR=1
