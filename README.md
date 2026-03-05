@@ -3,6 +3,8 @@
 [![CI](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml/badge.svg)](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml)
 [![ShellCheck](https://img.shields.io/badge/ShellCheck-passing-brightgreen)](https://github.com/koalaman/shellcheck)
 
+[한국어](README.ko.md)
+
 **AI Worktree Manager** — Create isolated git worktrees and launch your coding assistant (`claude`, `codex`, `gemini`) in one command.
 
 ```
