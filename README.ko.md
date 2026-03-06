@@ -29,8 +29,8 @@ source ~/.zshrc
 <summary>Homebrew (tap)</summary>
 
 ```sh
-brew tap IamGroooooot/cwt
-brew install cwt
+brew tap IamGroooooot/cwt https://github.com/IamGroooooot/cwt
+brew install IamGroooooot/cwt/cwt
 ```
 
 Homebrew로 설치한 후 caveats 출력에 따라 `.zshrc`에 source 라인을 추가하세요.
@@ -225,7 +225,7 @@ CWT_DIR=/path/to/cwt cwt update
 Homebrew로 설치한 경우:
 
 ```sh
-brew upgrade cwt
+brew upgrade IamGroooooot/cwt/cwt
 ```
 
 플러그인 매니저로 설치한 경우 해당 매니저를 통해 업데이트하거나, `CWT_DIR`을 플러그인 체크아웃 경로로 지정한 후 `cwt update`를 실행하세요.
@@ -336,7 +336,7 @@ git 기반 설치 (기본):
 Homebrew 설치:
 
 ```sh
-brew uninstall cwt
+brew uninstall IamGroooooot/cwt/cwt
 ```
 
 플러그인 매니저 설치의 경우 플러그인 체크아웃을 제거하고 셸 설정에서 관련 `cwt` 라인을 삭제하세요.

@@ -31,8 +31,8 @@ source ~/.zshrc
 <summary>Homebrew (tap)</summary>
 
 ```sh
-brew tap IamGroooooot/cwt
-brew install cwt
+brew tap IamGroooooot/cwt https://github.com/IamGroooooot/cwt
+brew install IamGroooooot/cwt/cwt
 ```
 
 After installing via Homebrew, follow the caveats output to add the source line to your `.zshrc`.
@@ -227,7 +227,7 @@ CWT_DIR=/path/to/cwt cwt update
 If you installed via Homebrew, update with:
 
 ```sh
-brew upgrade cwt
+brew upgrade IamGroooooot/cwt/cwt
 ```
 
 If you installed via a plugin manager, update through the plugin manager, or point `CWT_DIR` to that plugin checkout and run `cwt update`.
@@ -338,7 +338,7 @@ For git-based installs (default):
 For Homebrew installs:
 
 ```sh
-brew uninstall cwt
+brew uninstall IamGroooooot/cwt/cwt
 ```
 
 For plugin-manager installs, remove the plugin checkout and related `cwt` lines from your shell config.

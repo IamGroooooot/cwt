@@ -7,31 +7,53 @@ on:
     branches: [main]
 
 jobs:
-  shellcheck:
-    name: ShellCheck
-    runs-on: ubuntu-latest
+  lint:
+    name: Lint (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ShellCheck
+      - name: Install ShellCheck (Ubuntu)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      - name: Install ShellCheck (macOS)
+        if: runner.os == 'macOS'
+        run: brew install shellcheck
+
       - name: Run ShellCheck
-        run: shellcheck cwt.sh install.sh uninstall.sh cwt.plugin.zsh
+        run: shellcheck install.sh uninstall.sh
+
+      - name: Check zsh syntax
+        run: zsh -n cwt.sh cwt.plugin.zsh completions/_cwt
 
   bats:
-    name: BATS Tests
-    runs-on: ubuntu-latest
+    name: BATS Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install zsh
+      - name: Install zsh (Ubuntu)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh
 
-      - name: Install BATS
+      - name: Install BATS (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local
+
+      - name: Install BATS (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core
 
       - name: Run BATS tests
         run: bats tests/
