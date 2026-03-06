@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.9"
+CWT_VERSION="0.2.10"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -267,6 +267,115 @@ _cwt_permission_flag_for_assistant() {
   esac
 }
 
+_cwt_reset_launch_parse_state() {
+  _cwt_launch_parse_assistant=$(_cwt_default_assistant)
+  _cwt_launch_parse_target=$(_cwt_default_launch_target)
+  _cwt_launch_parse_permission=$(_cwt_default_permission_mode)
+  _cwt_launch_parse_target_explicit=0
+  _cwt_launch_parse_consumed=0
+  _cwt_launch_parse_requested=0
+}
+
+_cwt_parse_shared_launch_option() {
+  local arg="$1"
+  local next_value="$2"
+  local inline_value
+
+  _cwt_launch_parse_consumed=0
+  _cwt_launch_parse_requested=0
+
+  case "$arg" in
+    --assistant)
+      if [[ -z "$next_value" ]]; then
+        _cwt_log_error "Missing value for $(_cwt_bold '--assistant')."
+        echo "  Use one of: claude, codex, gemini" >&2
+        return 1
+      fi
+      _cwt_launch_parse_assistant="${next_value:l}"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=2
+      ;;
+    --assistant=*)
+      inline_value="${arg#--assistant=}"
+      _cwt_launch_parse_assistant="${inline_value:l}"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --claude|--codex|--gemini)
+      _cwt_launch_parse_assistant="${arg#--}"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --launch-target)
+      if [[ -z "$next_value" ]]; then
+        _cwt_log_error "Missing value for $(_cwt_bold '--launch-target')."
+        echo "  Use one of: current, split, tab" >&2
+        return 1
+      fi
+      _cwt_launch_parse_target="${next_value:l}"
+      _cwt_launch_parse_target_explicit=1
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=2
+      ;;
+    --launch-target=*)
+      inline_value="${arg#--launch-target=}"
+      _cwt_launch_parse_target="${inline_value:l}"
+      _cwt_launch_parse_target_explicit=1
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --current|--split|--tab)
+      _cwt_launch_parse_target="${arg#--}"
+      _cwt_launch_parse_target_explicit=1
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --all-permissions)
+      _cwt_launch_parse_permission="full"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --default-permissions)
+      _cwt_launch_parse_permission="default"
+      _cwt_launch_parse_consumed=1
+      ;;
+    --yolo)
+      _cwt_launch_parse_assistant="codex"
+      _cwt_launch_parse_permission="full"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    --dangerously-skip-permissions)
+      _cwt_launch_parse_assistant="claude"
+      _cwt_launch_parse_permission="full"
+      _cwt_launch_parse_requested=1
+      _cwt_launch_parse_consumed=1
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+
+  return 0
+}
+
+_cwt_preflight_launch_target() {
+  local launch_target="${1:l}"
+  local launch_target_explicit="${2:-0}"
+
+  if [[ "$launch_target_explicit" != "1" || "$launch_target" == "current" ]]; then
+    return 0
+  fi
+
+  local mux
+  mux=$(_cwt_active_multiplexer)
+  if [[ "$mux" == "none" ]]; then
+    _cwt_log_error "Launch target '$launch_target' requires tmux or zellij."
+    _cwt_log_item "Run inside tmux/zellij, or use $(_cwt_bold '--current')."
+    return 1
+  fi
+}
+
 _cwt_command_has_flag() {
   local flag="$1"
   shift
@@ -479,11 +588,9 @@ _cwt_ensure_default_worktree_ignored() {
 _cwt_new() {
   local no_launch=0
   [[ "${CWT_AUTO_LAUNCH:-true}" == "false" ]] && no_launch=1
-  local assistant="$(_cwt_default_assistant)"
-  local launch_target="$(_cwt_default_launch_target)"
-  local permission_mode="$(_cwt_default_permission_mode)"
-  local launch_target_explicit=0
   local positional=()
+
+  _cwt_reset_launch_parse_state
 
   while [[ $# -gt 0 ]]; do
     local arg="$1"
@@ -536,86 +643,22 @@ EOF
         no_launch=1
         shift
         ;;
-      --assistant)
-        if [[ $# -lt 2 ]]; then
-          _cwt_log_error "Missing value for $(_cwt_bold '--assistant')."
-          echo "  Use one of: claude, codex, gemini" >&2
-          return 1
-        fi
-        assistant="${2:l}"
-        no_launch=0
-        shift 2
-        ;;
-      --assistant=*)
-        assistant="${${arg#--assistant=}:l}"
-        no_launch=0
-        shift
-        ;;
-      --claude|--codex|--gemini)
-        assistant="${arg#--}"
-        no_launch=0
-        shift
-        ;;
-      --launch-target)
-        if [[ $# -lt 2 ]]; then
-          _cwt_log_error "Missing value for $(_cwt_bold '--launch-target')."
-          echo "  Use one of: current, split, tab" >&2
-          return 1
-        fi
-        launch_target="${2:l}"
-        launch_target_explicit=1
-        no_launch=0
-        shift 2
-        ;;
-      --launch-target=*)
-        launch_target="${${arg#--launch-target=}:l}"
-        launch_target_explicit=1
-        no_launch=0
-        shift
-        ;;
-      --current)
-        launch_target="current"
-        launch_target_explicit=1
-        no_launch=0
-        shift
-        ;;
-      --split)
-        launch_target="split"
-        launch_target_explicit=1
-        no_launch=0
-        shift
-        ;;
-      --tab)
-        launch_target="tab"
-        launch_target_explicit=1
-        no_launch=0
-        shift
-        ;;
-      --all-permissions)
-        permission_mode="full"
-        no_launch=0
-        shift
-        ;;
-      --default-permissions)
-        permission_mode="default"
-        shift
-        ;;
-      --yolo)
-        assistant="codex"
-        permission_mode="full"
-        no_launch=0
-        shift
-        ;;
-      --dangerously-skip-permissions)
-        assistant="claude"
-        permission_mode="full"
-        no_launch=0
-        shift
-        ;;
       -*)
-        _cwt_log_error "Unknown option for cwt new: $(_cwt_bold "$arg")"
-        echo "  Run $(_cwt_bold 'cwt new --help') for usage." >&2
-        return 1
+        _cwt_parse_shared_launch_option "$1" "${2:-}"
+        case $? in
+          0)
+            [[ "$_cwt_launch_parse_requested" == "1" ]] && no_launch=0
+            shift "$_cwt_launch_parse_consumed"
+            ;;
+          1)
+            return 1
+            ;;
+          *)
+            _cwt_log_error "Unknown option for cwt new: $(_cwt_bold "$arg")"
+            echo "  Run $(_cwt_bold 'cwt new --help') for usage." >&2
+            return 1
+            ;;
+        esac
         ;;
       *)
         positional+=("$1")
@@ -623,6 +666,11 @@ EOF
         ;;
     esac
   done
+
+  local assistant="$_cwt_launch_parse_assistant"
+  local launch_target="$_cwt_launch_parse_target"
+  local permission_mode="$_cwt_launch_parse_permission"
+  local launch_target_explicit="$_cwt_launch_parse_target_explicit"
 
   if ! _cwt_is_valid_assistant "$assistant"; then
     _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
@@ -644,13 +692,7 @@ EOF
 
   # Fail fast for explicit split/tab requests before mutating repository state.
   if [[ $no_launch -eq 0 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
-    local preflight_mux
-    preflight_mux=$(_cwt_active_multiplexer)
-    if [[ "$preflight_mux" == "none" ]]; then
-      _cwt_log_error "Launch target '$launch_target' requires tmux or zellij."
-      _cwt_log_item "Run inside tmux/zellij, or use $(_cwt_bold '--current')."
-      return 1
-    fi
+    _cwt_preflight_launch_target "$launch_target" "$launch_target_explicit" || return 1
   fi
 
   # 1) Worktree name
@@ -1097,11 +1139,9 @@ EOF
 
 _cwt_cd() {
   local launch_assistant=0
-  local assistant="$(_cwt_default_assistant)"
-  local launch_target="$(_cwt_default_launch_target)"
-  local permission_mode="$(_cwt_default_permission_mode)"
-  local launch_target_explicit=0
   local positional=()
+
+  _cwt_reset_launch_parse_state
 
   while [[ $# -gt 0 ]]; do
     local arg="$1"
@@ -1144,86 +1184,22 @@ $(_cwt_bold 'EXAMPLES')
   cwt cd                                # Main repo: interactive selection, worktree: return to main
 EOF
         return 0 ;;
-      --assistant)
-        if [[ $# -lt 2 ]]; then
-          _cwt_log_error "Missing value for $(_cwt_bold '--assistant')."
-          echo "  Use one of: claude, codex, gemini" >&2
-          return 1
-        fi
-        assistant="${2:l}"
-        launch_assistant=1
-        shift 2
-        ;;
-      --assistant=*)
-        assistant="${${arg#--assistant=}:l}"
-        launch_assistant=1
-        shift
-        ;;
-      --claude|--codex|--gemini)
-        assistant="${arg#--}"
-        launch_assistant=1
-        shift
-        ;;
-      --launch-target)
-        if [[ $# -lt 2 ]]; then
-          _cwt_log_error "Missing value for $(_cwt_bold '--launch-target')."
-          echo "  Use one of: current, split, tab" >&2
-          return 1
-        fi
-        launch_target="${2:l}"
-        launch_target_explicit=1
-        launch_assistant=1
-        shift 2
-        ;;
-      --launch-target=*)
-        launch_target="${${arg#--launch-target=}:l}"
-        launch_target_explicit=1
-        launch_assistant=1
-        shift
-        ;;
-      --current)
-        launch_target="current"
-        launch_target_explicit=1
-        launch_assistant=1
-        shift
-        ;;
-      --split)
-        launch_target="split"
-        launch_target_explicit=1
-        launch_assistant=1
-        shift
-        ;;
-      --tab)
-        launch_target="tab"
-        launch_target_explicit=1
-        launch_assistant=1
-        shift
-        ;;
-      --all-permissions)
-        permission_mode="full"
-        launch_assistant=1
-        shift
-        ;;
-      --default-permissions)
-        permission_mode="default"
-        shift
-        ;;
-      --yolo)
-        assistant="codex"
-        permission_mode="full"
-        launch_assistant=1
-        shift
-        ;;
-      --dangerously-skip-permissions)
-        assistant="claude"
-        permission_mode="full"
-        launch_assistant=1
-        shift
-        ;;
       -*)
-        _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
-        echo "  Run $(_cwt_bold 'cwt cd --help') for usage." >&2
-        return 1
+        _cwt_parse_shared_launch_option "$1" "${2:-}"
+        case $? in
+          0)
+            [[ "$_cwt_launch_parse_requested" == "1" ]] && launch_assistant=1
+            shift "$_cwt_launch_parse_consumed"
+            ;;
+          1)
+            return 1
+            ;;
+          *)
+            _cwt_log_error "Unknown option for cwt cd: $(_cwt_bold "$arg")"
+            echo "  Run $(_cwt_bold 'cwt cd --help') for usage." >&2
+            return 1
+            ;;
+        esac
         ;;
       *)
         positional+=("$1")
@@ -1231,6 +1207,11 @@ EOF
         ;;
     esac
   done
+
+  local assistant="$_cwt_launch_parse_assistant"
+  local launch_target="$_cwt_launch_parse_target"
+  local permission_mode="$_cwt_launch_parse_permission"
+  local launch_target_explicit="$_cwt_launch_parse_target_explicit"
 
   if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_assistant "$assistant"; then
     _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
@@ -1248,6 +1229,10 @@ EOF
     _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
     _cwt_log_info "Use one of: default full"
     return 1
+  fi
+
+  if [[ $launch_assistant -eq 1 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
+    _cwt_preflight_launch_target "$launch_target" "$launch_target_explicit" || return 1
   fi
 
   local selected="${positional[1]}"

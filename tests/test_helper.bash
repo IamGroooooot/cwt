@@ -12,39 +12,39 @@ export NO_COLOR=1
 CWT_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/cwt.sh"
 
 setup() {
-  TEST_TMPDIR="$(mktemp -d)"
-  export HOME="$TEST_TMPDIR"
-  export XDG_CONFIG_HOME="$TEST_TMPDIR/.config"
-  # Ensure mux-dependent tests are deterministic regardless of host shell.
-  unset TMUX
-  unset ZELLIJ
+	TEST_TMPDIR="$(mktemp -d)"
+	export HOME="$TEST_TMPDIR"
+	export XDG_CONFIG_HOME="$TEST_TMPDIR/.config"
+	# Ensure mux-dependent tests are deterministic regardless of host shell.
+	unset TMUX
+	unset ZELLIJ
 }
 
 teardown() {
-  if [[ -n "$TEST_TMPDIR" && -d "$TEST_TMPDIR" ]]; then
-    # Clean up any git worktrees before removing the temp dir
-    # to avoid git lock issues
-    local git_dir
-    for git_dir in "$TEST_TMPDIR"/*/; do
-      if [[ -d "${git_dir}.git" ]]; then
-        git -C "$git_dir" worktree prune 2>/dev/null || true
-      fi
-    done
-    rm -rf "$TEST_TMPDIR"
-  fi
+	if [[ -n "$TEST_TMPDIR" && -d "$TEST_TMPDIR" ]]; then
+		# Clean up any git worktrees before removing the temp dir
+		# to avoid git lock issues
+		local git_dir
+		for git_dir in "$TEST_TMPDIR"/*/; do
+			if [[ -d "${git_dir}.git" ]]; then
+				git -C "$git_dir" worktree prune 2>/dev/null || true
+			fi
+		done
+		rm -rf "$TEST_TMPDIR"
+	fi
 }
 
 # Create a bare-bones git repo at $TEST_TMPDIR/repo with an initial commit.
 # Sets REPO_DIR to the created path.
 create_test_repo() {
-  REPO_DIR="$TEST_TMPDIR/repo"
-  mkdir -p "$REPO_DIR"
-  git -C "$REPO_DIR" init -b main --quiet
-  git -C "$REPO_DIR" config user.email "test@test.com"
-  git -C "$REPO_DIR" config user.name "Test"
-  echo "init" > "$REPO_DIR/file.txt"
-  git -C "$REPO_DIR" add file.txt
-  git -C "$REPO_DIR" commit -m "initial commit" --quiet
+	REPO_DIR="$TEST_TMPDIR/repo"
+	mkdir -p "$REPO_DIR"
+	git -C "$REPO_DIR" init -b main --quiet
+	git -C "$REPO_DIR" config user.email "test@test.com"
+	git -C "$REPO_DIR" config user.name "Test"
+	echo "init" >"$REPO_DIR/file.txt"
+	git -C "$REPO_DIR" add file.txt
+	git -C "$REPO_DIR" commit -m "initial commit" --quiet
 }
 
 # Run a cwt function inside zsh.
@@ -54,16 +54,16 @@ create_test_repo() {
 # This sources cwt.sh in a zsh subshell and calls the given function.
 # stdout+stderr are captured, and the exit code is returned.
 run_cwt() {
-  local func="$1"
-  shift
-  # Build a zsh command that sources cwt.sh and calls the function
-  # We pass args via positional parameters to avoid quoting issues
-  local args_str=""
-  for arg in "$@"; do
-    args_str+=" $(printf '%q' "$arg")"
-  done
+	local func="$1"
+	shift
+	# Build a zsh command that sources cwt.sh and calls the function
+	# We pass args via positional parameters to avoid quoting issues
+	local args_str=""
+	for arg in "$@"; do
+		args_str+=" $(printf '%q' "$arg")"
+	done
 
-  run zsh -c "
+	run zsh -c "
     export NO_COLOR=1
     source '$CWT_SH'
     $func$args_str
@@ -73,15 +73,15 @@ run_cwt() {
 # Run a cwt function inside a specific directory (cd first).
 # Usage: run_cwt_in <dir> <function> [args...]
 run_cwt_in() {
-  local dir="$1"
-  local func="$2"
-  shift 2
-  local args_str=""
-  for arg in "$@"; do
-    args_str+=" $(printf '%q' "$arg")"
-  done
+	local dir="$1"
+	local func="$2"
+	shift 2
+	local args_str=""
+	for arg in "$@"; do
+		args_str+=" $(printf '%q' "$arg")"
+	done
 
-  run zsh -c "
+	run zsh -c "
     export NO_COLOR=1
     cd '$dir'
     source '$CWT_SH'
