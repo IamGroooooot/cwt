@@ -3,6 +3,8 @@
 [![CI](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml/badge.svg)](https://github.com/IamGroooooot/cwt/actions/workflows/ci.yml)
 [![ShellCheck](https://img.shields.io/badge/ShellCheck-passing-brightgreen)](https://github.com/koalaman/shellcheck)
 
+[English](README.md)
+
 **AI Worktree Manager** — 격리된 git worktree를 생성하고 코딩 어시스턴트(`claude`, `codex`, `gemini`)를 한 번의 명령으로 실행합니다.
 
 ```
@@ -11,27 +13,56 @@ cwt new fix-auth main
 
 worktree를 생성하고, 새 브랜치를 체크아웃하고, 설정 파일을 복사한 뒤 어시스턴트 세션을 시작합니다.
 
-## 설치
+`cwt`는 기존 git 저장소 안에서 실행합니다. 셸 연동은 `zsh`를 기준으로 제공합니다.
+
+## 빠른 시작
+
+설치한 뒤 셸을 다시 읽고, git 저장소로 이동한 다음 `cwt new`를 실행하면 됩니다.
+기본적으로 `zsh`와 `git`이 필요하고, 어시스턴트 자동 실행이 필요할 때만 해당 CLI를 설치하면 됩니다.
+
+```sh
+# 설치 (권장)
+curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | sh
+
+# 셸 다시 읽기
+source ~/.zshrc
+
+# 아무 git 저장소로 이동
+cd /path/to/your/repo
+
+# worktree만 생성
+cwt new fix-auth --no-launch
+
+# 또는 worktree 생성 후 어시스턴트 실행
+cwt new fix-auth --assistant codex
+```
+
+## 설치 방법
+
+처음이면 권장 설치부터 시작하는 편이 가장 빠릅니다.
+패키지 매니저로 업데이트하고 싶으면 Homebrew, 이미 zsh 플러그인 매니저를 쓰고 있으면 그 방식, 설치 위치를 직접 관리해야 하면 수동 설치를 고르세요.
+
+### 권장 설치
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | sh
 ```
 
-수동 설치:
+대부분의 사용자에게 가장 빠른 경로입니다.
+`cwt` 설치, `source` 설정, zsh completion 설정까지 한 번에 끝냅니다.
+
+### Homebrew
 
 ```sh
-git clone --depth 1 https://github.com/IamGroooooot/cwt.git ~/.cwt
-echo '[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"' >> ~/.zshrc
-source ~/.zshrc
+brew install IamGroooooot/cwt/cwt
 ```
 
+Homebrew로 설치한 뒤에는 caveats 출력에 따라 `.zshrc`가 Homebrew prefix를 가리키도록 설정하세요.
+
 <details>
-<summary>Homebrew (tap)</summary>
+<summary>고급 Homebrew</summary>
 
 ```sh
-# 안정 버전
-brew install IamGroooooot/cwt/cwt
-
 # 이 tap의 최신 커밋
 brew install --HEAD IamGroooooot/cwt/cwt
 
@@ -40,14 +71,12 @@ brew tap IamGroooooot/cwt "$(pwd)"
 brew reinstall --HEAD IamGroooooot/cwt/cwt
 ```
 
-Homebrew로 설치한 후 caveats 출력에 따라 `.zshrc`에 source 라인을 추가하세요.
 `brew install`은 최신 태그 릴리스를 설치하고, `--HEAD`는 현재 tap 체크아웃을 설치합니다.
 커밋되지 않은 로컬 변경까지 반영해야 하면 Homebrew 대신 `./cwt.sh`를 직접 source 하세요.
 
 </details>
 
-<details>
-<summary>플러그인 매니저 (zinit, antigen, oh-my-zsh)</summary>
+### 플러그인 매니저
 
 ```zsh
 # zinit
@@ -61,7 +90,17 @@ git clone https://github.com/IamGroooooot/cwt.git ${ZSH_CUSTOM:-~/.oh-my-zsh/cus
 # .zshrc의 plugins=(...)에 'cwt' 추가
 ```
 
-</details>
+### 수동 또는 커스텀 설치
+
+```sh
+git clone --depth 1 https://github.com/IamGroooooot/cwt.git ~/.cwt
+echo 'fpath=("$HOME/.cwt/completions" $fpath)' >> ~/.zshrc
+echo '[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"' >> ~/.zshrc
+echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
+source ~/.zshrc
+```
+
+`~/.cwt`가 아닌 다른 경로에 설치했다면 위 두 줄의 경로도 같은 값으로 바꾸세요.
 
 ## 탭 자동완성
 
@@ -79,10 +118,15 @@ cwt rm --<TAB>   → --help, --force/-f
 **수동 설정** (플러그인 매니저 또는 커스텀 설치):
 
 ```zsh
+# 예시: ~/.cwt 에 수동 설치한 경우
 # .zshrc의 compinit 이전에 추가
 fpath=("$HOME/.cwt/completions" $fpath)
+[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"
 autoload -Uz compinit && compinit
 ```
+
+다른 위치에 설치했다면 `$HOME/.cwt`를 실제 설치 경로로 바꾸세요.
+Homebrew 설치라면 caveats 출력의 경로를 그대로 사용하는 편이 안전합니다.
 
 ## 사용법
 
@@ -109,13 +153,6 @@ cwt new fix-auth --assistant codex               # 생성 + 현재 셸에서 실
 cwt new fix-auth --assistant codex --split       # 생성 + 분할 창에서 실행 (tmux/zellij)
 cwt new fix-auth --no-launch                     # 생성만
 ```
-
-## 주요 변경사항
-
-- 기본 worktree 디렉토리가 `<git-root>/.worktrees`로 변경 (이전: `.claude/worktrees`).
-- `--no-launch`가 `--no-claude`를 대체.
-- `CWT_AUTO_LAUNCH`가 `CWT_AUTO_CLAUDE`를 대체.
-- `cwt new/cd`에서 `--assistant <claude|codex|gemini>` 및 단축 옵션 `--claude`, `--codex`, `--gemini` 지원.
 
 ### worktree 생성
 
@@ -339,6 +376,13 @@ worktree는 `<project>/.worktrees/<name>` 아래에 생성됩니다. 각 worktre
   - `codex`
   - `gemini` 또는 `gemini-cli`
 - **tmux 또는 zellij** *(선택, `--split`/`--tab` 전용)*
+
+## 마이그레이션 노트
+
+- 기본 worktree 디렉토리가 `<git-root>/.worktrees`로 변경 (이전: `.claude/worktrees`).
+- `--no-launch`가 `--no-claude`를 대체.
+- `CWT_AUTO_LAUNCH`가 `CWT_AUTO_CLAUDE`를 대체.
+- `cwt new/cd`에서 `--assistant <claude|codex|gemini>` 및 단축 옵션 `--claude`, `--codex`, `--gemini` 지원.
 
 ## 제거
 

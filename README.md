@@ -13,27 +13,56 @@ cwt new fix-auth main
 
 Creates a worktree, checks out a new branch, copies config files, and drops you into an assistant session — all in seconds.
 
-## Install
+Run `cwt` inside an existing git repository. Shell integration targets `zsh`.
+
+## Quick Start
+
+Install it, reload your shell, move into any git repository, and run `cwt new`.
+You need `zsh` and `git`; assistant CLIs are optional unless you want auto-launch.
+
+```sh
+# install (recommended)
+curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | sh
+
+# reload your shell
+source ~/.zshrc
+
+# move into any git repository
+cd /path/to/your/repo
+
+# create a worktree only
+cwt new fix-auth --no-launch
+
+# or create a worktree and launch an assistant
+cwt new fix-auth --assistant codex
+```
+
+## Install Methods
+
+If you're not sure, use the installer.
+Choose Homebrew for package-managed updates, a plugin manager if you already manage zsh plugins that way, and manual install only when you want a custom checkout path.
+
+### Recommended installer
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | sh
 ```
 
-Or manually:
+This is the shortest path for most users.
+It installs `cwt`, adds the `source` line, and enables zsh completion automatically.
+
+### Homebrew
 
 ```sh
-git clone --depth 1 https://github.com/IamGroooooot/cwt.git ~/.cwt
-echo '[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"' >> ~/.zshrc
-source ~/.zshrc
+brew install IamGroooooot/cwt/cwt
 ```
 
+After installing via Homebrew, follow the caveats output so your `.zshrc` points at the Homebrew prefix.
+
 <details>
-<summary>Homebrew (tap)</summary>
+<summary>Advanced Homebrew</summary>
 
 ```sh
-# stable release
-brew install IamGroooooot/cwt/cwt
-
 # latest committed code from this tap
 brew install --HEAD IamGroooooot/cwt/cwt
 
@@ -42,14 +71,12 @@ brew tap IamGroooooot/cwt "$(pwd)"
 brew reinstall --HEAD IamGroooooot/cwt/cwt
 ```
 
-After installing via Homebrew, follow the caveats output to add the source line to your `.zshrc`.
 Use `brew install` for the latest tagged release and `--HEAD` for the current tap checkout.
 If you need uncommitted local edits, source `./cwt.sh` directly instead of going through Homebrew.
 
 </details>
 
-<details>
-<summary>Plugin managers (zinit, antigen, oh-my-zsh)</summary>
+### Plugin managers
 
 ```zsh
 # zinit
@@ -63,7 +90,17 @@ git clone https://github.com/IamGroooooot/cwt.git ${ZSH_CUSTOM:-~/.oh-my-zsh/cus
 # then add 'cwt' to plugins=(...) in .zshrc
 ```
 
-</details>
+### Manual or custom install
+
+```sh
+git clone --depth 1 https://github.com/IamGroooooot/cwt.git ~/.cwt
+echo 'fpath=("$HOME/.cwt/completions" $fpath)' >> ~/.zshrc
+echo '[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"' >> ~/.zshrc
+echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
+source ~/.zshrc
+```
+
+If you install somewhere other than `~/.cwt`, replace that path in both lines above.
 
 ## Tab Completion
 
@@ -81,10 +118,15 @@ cwt rm --<TAB>   → --help, --force/-f
 **Manual setup** (for plugin managers or custom installs):
 
 ```zsh
+# Example: manual install at ~/.cwt
 # Add to .zshrc BEFORE compinit
 fpath=("$HOME/.cwt/completions" $fpath)
+[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"
 autoload -Uz compinit && compinit
 ```
+
+If you installed somewhere else, replace `$HOME/.cwt` with your actual install path.
+If you installed via Homebrew, use the caveats output so the path matches your Homebrew prefix.
 
 ## Usage
 
@@ -111,13 +153,6 @@ cwt new fix-auth --assistant codex               # create + launch in current sh
 cwt new fix-auth --assistant codex --split       # create + launch in split pane (tmux/zellij)
 cwt new fix-auth --no-launch                     # create only
 ```
-
-## Breaking changes
-
-- Default worktree directory is now `<git-root>/.worktrees` (was `.claude/worktrees`).
-- `--no-launch` replaces `--no-claude`.
-- `CWT_AUTO_LAUNCH` replaces `CWT_AUTO_CLAUDE`.
-- `cwt new/cd` now support `--assistant <claude|codex|gemini>` and shortcuts `--claude`, `--codex`, `--gemini`.
 
 ### Create a worktree
 
@@ -341,6 +376,13 @@ Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branc
   - `codex`
   - `gemini` or `gemini-cli`
 - **tmux or zellij** *(optional, only for `--split`/`--tab`)*
+
+## Migration Notes
+
+- Default worktree directory is now `<git-root>/.worktrees` (was `.claude/worktrees`).
+- `--no-launch` replaces `--no-claude`.
+- `CWT_AUTO_LAUNCH` replaces `CWT_AUTO_CLAUDE`.
+- `cwt new/cd` now support `--assistant <claude|codex|gemini>` and shortcuts `--claude`, `--codex`, `--gemini`.
 
 ## Uninstall
 
