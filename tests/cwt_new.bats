@@ -69,7 +69,7 @@ teardown() {
     export CWT_FORCE_SETUP_WIZARD=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    printf '1\n' | cwt new --no-launch wizard-default HEAD
+    printf '\n' | cwt new --no-launch wizard-default HEAD
   "
 
   [ "$status" -eq 0 ]
@@ -90,7 +90,7 @@ teardown() {
     export CWT_FORCE_SETUP_WIZARD=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    printf '2\n1\n' | cwt new --no-launch wizard-sibling HEAD
+    printf 'n\n1\n\n' | cwt new --no-launch wizard-sibling HEAD
   "
 
   [ "$status" -eq 0 ]
@@ -109,7 +109,7 @@ teardown() {
     export CWT_FORCE_SETUP_WIZARD=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    printf '2\n' | cwt new --no-launch wizard-claude HEAD
+    printf 'n\n1\n' | cwt new --no-launch wizard-claude HEAD
   "
 
   [ "$status" -eq 0 ]
@@ -126,13 +126,30 @@ teardown() {
     export CWT_FORCE_SETUP_WIZARD=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    printf '2\n' | cwt new --no-launch wizard-codex HEAD
+    printf 'n\n1\n' | cwt new --no-launch wizard-codex HEAD
   "
 
   [ "$status" -eq 0 ]
   run grep -q "CWT_WORKTREE_DIR=\\.codex/worktrees" "$XDG_CONFIG_HOME/cwt/config"
   [ "$status" -eq 0 ]
   [ -d "$REPO_DIR/.codex/worktrees/wizard-codex" ]
+}
+
+@test "cwt new: first-run browser supports arrow navigation into another folder" {
+  mkdir -p "$TEST_TMPDIR/shared"
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf 'n\n1\n\033[B\033[B\033[B\033[C\033[B\n' | cwt new --no-launch wizard-arrow HEAD
+  "
+
+  [ "$status" -eq 0 ]
+  run grep -q "CWT_WORKTREE_DIR=\\.\\./shared" "$XDG_CONFIG_HOME/cwt/config"
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_TMPDIR/shared/wizard-arrow" ]
 }
 
 @test "cwt new: relative CWT_WORKTREE_DIR in config resolves from git root" {

@@ -228,109 +228,152 @@ _cwt_print_detected_worktree_roots() {
   done
 }
 
+_cwt_read_browse_key() {
+  local key
+  local next_key
+  local final_key
+
+  IFS= read -rk1 -u 0 key || return 1
+
+  case "$key" in
+    $'\n'|$'\r')
+      print -r -- "enter"
+      ;;
+    q|Q)
+      print -r -- "quit"
+      ;;
+    h)
+      print -r -- "left"
+      ;;
+    j)
+      print -r -- "down"
+      ;;
+    k)
+      print -r -- "up"
+      ;;
+    l)
+      print -r -- "right"
+      ;;
+    $'\e')
+      IFS= read -rk1 -u 0 -t 0.01 next_key || {
+        print -r -- "quit"
+        return 0
+      }
+      if [[ "$next_key" == "[" ]]; then
+        IFS= read -rk1 -u 0 -t 0.01 final_key || {
+          print -r -- "quit"
+          return 0
+        }
+        case "$final_key" in
+          A) print -r -- "up" ;;
+          B) print -r -- "down" ;;
+          C) print -r -- "right" ;;
+          D) print -r -- "left" ;;
+          *) print -r -- "other" ;;
+        esac
+      else
+        print -r -- "quit"
+      fi
+      ;;
+    *)
+      print -r -- "other"
+      ;;
+  esac
+}
+
 _cwt_browse_for_worktree_root() {
   local browse_dir="${_cwt_git_root:h}"
   local repo_name="${_cwt_git_root:t}"
-  local suggested_dir choice folder_name chosen_dir
+  local suggested_dir
+  local chosen_dir
+  local key
+  local index
+  local selected_index=1
   local -a child_dirs=()
   local -a action_kinds=()
   local -a action_values=()
   local -a action_labels=()
-  local index
 
   while true; do
     suggested_dir="${browse_dir}/${repo_name}-worktrees"
     child_dirs=("$browse_dir"/*(/N))
-    action_kinds=()
-    action_values=()
-    action_labels=()
 
-    action_kinds+=("suggested")
-    action_values+=("$suggested_dir")
-    action_labels+=("Create or use $suggested_dir")
-
-    action_kinds+=("current")
-    action_values+=("$browse_dir")
-    if [[ "$browse_dir" == "${_cwt_git_root:h}" ]]; then
-      action_labels+=("Use $browse_dir directly (not recommended)")
-    else
-      action_labels+=("Use $browse_dir as the worktree root")
-    fi
-
-    action_kinds+=("create")
-    action_values+=("$browse_dir")
-    action_labels+=("Create another folder here")
-
-    if [[ "$browse_dir" != "/" ]]; then
-      action_kinds+=("up")
-      action_values+=("${browse_dir:h}")
-      action_labels+=("Go up to ${browse_dir:h}")
-    fi
+    action_kinds=("suggested" "current")
+    action_values=("$suggested_dir" "$browse_dir")
+    action_labels=("Create or use ${suggested_dir}" "Use ${browse_dir} as the worktree root")
 
     for chosen_dir in "${child_dirs[@]}"; do
-      action_kinds+=("enter")
+      action_kinds+=("child")
       action_values+=("$chosen_dir")
-      action_labels+=("Browse ${chosen_dir:t}/")
+      action_labels+=("${chosen_dir:t}/")
     done
 
-    action_kinds+=("cancel")
-    action_values+=("")
-    action_labels+=("Cancel")
+    (( selected_index < 1 )) && selected_index=1
+    (( selected_index > ${#action_kinds[@]} )) && selected_index=${#action_kinds[@]}
 
-    echo "" >&2
-    _cwt_log_info "Choose a folder for this project's worktrees."
-    _cwt_log_item "Current location: $browse_dir"
-    index=1
-    for choice in "${action_labels[@]}"; do
-      echo "   $(_cwt_dim "$index)") $choice" >&2
-      ((index++))
-    done
-
-    choice=$(_cwt_prompt_choice "Choose a folder action [1]: " "1")
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#action_kinds[@]} )); then
-      _cwt_log_error "Invalid selection."
-      continue
+    if [[ -t 2 ]]; then
+      printf '\033[2J\033[H' >&2
     fi
 
-    case "${action_kinds[$choice]}" in
-      suggested)
-        chosen_dir="${action_values[$choice]}"
+    echo "" >&2
+    _cwt_log_info "Browse for a worktree folder."
+    _cwt_log_item "Current location: $(_cwt_dim "$browse_dir")"
+    _cwt_log_item "← up  → enter folder  ↑/↓ move  Enter select  q cancel"
+    echo "" >&2
+
+    for (( index = 1; index <= ${#action_kinds[@]}; index++ )); do
+      if (( index == selected_index )); then
+        echo "   $(_cwt_cyan '>') ${action_labels[$index]}" >&2
+      else
+        echo "     ${action_labels[$index]}" >&2
+      fi
+    done
+
+    key=$(_cwt_read_browse_key) || return 1
+    case "$key" in
+      up)
+        (( selected_index > 1 )) && ((selected_index--))
         ;;
-      current)
-        chosen_dir="${action_values[$choice]}"
-        if [[ "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
-          _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
+      down)
+        (( selected_index < ${#action_kinds[@]} )) && ((selected_index++))
+        ;;
+      left)
+        if [[ "$browse_dir" != "/" ]]; then
+          browse_dir="${browse_dir:h}"
+          selected_index=1
         fi
         ;;
-      create)
-        folder_name=$(_cwt_prompt_choice "Folder name relative to $browse_dir: " "${repo_name}-worktrees")
-        [[ -z "$folder_name" ]] && {
-          _cwt_log_error "Folder name is required."
-          continue
-        }
-        chosen_dir="${browse_dir}/${folder_name}"
-        ;;
-      up)
-        browse_dir="${action_values[$choice]}"
-        continue
+      right)
+        if [[ "${action_kinds[$selected_index]}" == "child" ]]; then
+          browse_dir="${action_values[$selected_index]}"
+          selected_index=1
+        fi
         ;;
       enter)
-        browse_dir="${action_values[$choice]}"
-        continue
+        case "${action_kinds[$selected_index]}" in
+          child)
+            browse_dir="${action_values[$selected_index]}"
+            selected_index=1
+            ;;
+          suggested|current)
+            chosen_dir="${action_values[$selected_index]:A}"
+            if [[ "${action_kinds[$selected_index]}" == "current" && "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
+              _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
+            fi
+            _cwt_validate_worktrees_dir "$chosen_dir" || continue
+            mkdir -p "$chosen_dir" 2>/dev/null || {
+              _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+              continue
+            }
+            print -r -- "$chosen_dir"
+            return 0
+            ;;
+        esac
         ;;
-      cancel)
+      quit)
         return 1
         ;;
     esac
-
-    chosen_dir="${chosen_dir:A}"
-    _cwt_validate_worktrees_dir "$chosen_dir" || continue
-    mkdir -p "$chosen_dir" 2>/dev/null || {
-      _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
-      continue
-    }
-    print -r -- "$chosen_dir"
-    return 0
   done
 }
 
@@ -397,6 +440,7 @@ _cwt_maybe_run_setup_wizard() {
   local default_root="${_cwt_git_root}/.worktrees"
   local config_value=""
   local custom_root
+  local browse_status
   local choice
   local index
   local -a option_kinds=()
@@ -409,13 +453,15 @@ _cwt_maybe_run_setup_wizard() {
   config_file=$(_cwt_config_file_path)
 
   echo "" >&2
-  _cwt_log_info "No cwt config found. Let's choose where this project's worktrees should live."
+  _cwt_log_info "No cwt config found."
   _cwt_log_item "Project: $(_cwt_bold "$_cwt_git_root")"
+  _cwt_log_item "Recommended worktree root: $(_cwt_dim "$default_root")"
   _cwt_log_item "Config file: $(_cwt_dim "$config_file")"
 
-  option_kinds+=("default")
-  option_values+=("")
-  option_labels+=("Recommended: use ${default_root}")
+  if _cwt_confirm "Use the recommended location?" "y"; then
+    _cwt_apply_setup_choice "" "$config_file" || return 1
+    return 0
+  fi
 
   while IFS='|' read -r detected_label detected_path; do
     [[ -z "$detected_label" || -z "$detected_path" ]] && continue
@@ -426,7 +472,7 @@ _cwt_maybe_run_setup_wizard() {
 
   option_kinds+=("browse")
   option_values+=("")
-  option_labels+=("Choose or create another worktree folder")
+  option_labels+=("Browse for another worktree folder")
 
   option_kinds+=("skip")
   option_values+=("")
@@ -434,13 +480,14 @@ _cwt_maybe_run_setup_wizard() {
 
   while true; do
     echo "" >&2
+    _cwt_log_info "Okay. Choose another location."
     index=1
     for choice in "${option_labels[@]}"; do
       echo "   $(_cwt_dim "$index)") $choice" >&2
       ((index++))
     done
 
-    choice=$(_cwt_prompt_choice "Choose a setup option [1]: " "1")
+    choice=$(_cwt_prompt_choice "Choose another option [1]: " "1")
     if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#option_kinds[@]} )); then
       _cwt_log_error "Invalid selection."
       continue
@@ -457,7 +504,11 @@ _cwt_maybe_run_setup_wizard() {
         return 0
         ;;
       browse)
-        custom_root=$(_cwt_browse_for_worktree_root) || continue
+        custom_root=$(_cwt_browse_for_worktree_root)
+        browse_status=$?
+        if [[ "$browse_status" != "0" ]]; then
+          continue
+        fi
         config_value=$(_cwt_worktrees_config_value "$custom_root")
         _cwt_apply_setup_choice "$config_value" "$config_file" || return 1
         return 0

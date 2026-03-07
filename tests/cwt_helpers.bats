@@ -325,7 +325,7 @@ teardown() {
     export CWT_FORCE_SETUP_WIZARD=1
     cd '$REPO_DIR'
     source '$CWT_SH'
-    printf '1\n' | cwt
+    printf '\n' | cwt
   "
 
   [ "$status" -eq 0 ]
