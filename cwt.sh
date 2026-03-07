@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.17"
+CWT_VERSION="0.2.18"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -53,14 +53,214 @@ _cwt_log_item()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo "   $(_cwt_dim 
 
 # ── Config loader ─────────────────────────────────────────────────────────
 
+typeset -gA _cwt_project_worktree_dirs=()
+typeset -g _cwt_project_worktree_dir=""
+typeset -g _cwt_current_project_has_config=0
+typeset -g _cwt_legacy_global_worktree_dir=""
+typeset -g _cwt_config_default_base_branch=""
+typeset -g _cwt_config_default_assistant=""
+typeset -g _cwt_config_auto_launch=""
+typeset -g _cwt_config_launch_target=""
+typeset -g _cwt_config_permission_mode=""
+typeset -g _cwt_config_cmd_claude=""
+typeset -g _cwt_config_cmd_codex=""
+typeset -g _cwt_config_cmd_gemini=""
+
 _cwt_config_file_path() {
   print -r -- "${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
 }
 
+_cwt_reset_loaded_config() {
+  _cwt_project_worktree_dirs=()
+  _cwt_project_worktree_dir=""
+  _cwt_current_project_has_config=0
+  _cwt_legacy_global_worktree_dir=""
+  _cwt_config_default_base_branch=""
+  _cwt_config_default_assistant=""
+  _cwt_config_auto_launch=""
+  _cwt_config_launch_target=""
+  _cwt_config_permission_mode=""
+  _cwt_config_cmd_claude=""
+  _cwt_config_cmd_codex=""
+  _cwt_config_cmd_gemini=""
+}
+
 _cwt_load_config() {
+  _cwt_reset_loaded_config
+}
+
+_cwt_yaml_quote() {
+  local value="$1"
+  value="${value//\'/\'\'}"
+  print -r -- "'${value}'"
+}
+
+_cwt_yaml_unquote() {
+  local value="$1"
+  local first_char
+  local last_char
+
+  if (( ${#value} >= 2 )); then
+    first_char="${value[1]}"
+    last_char="${value[-1]}"
+  fi
+
+  if [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+    value="${value//\'\'/\'}"
+  elif [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+  fi
+
+  print -r -- "$value"
+}
+
+_cwt_assign_loaded_setting() {
+  local key="$1"
+  local value="$2"
+
+  case "$key" in
+    default_base_branch)
+      _cwt_config_default_base_branch="$value"
+      ;;
+    default_assistant)
+      _cwt_config_default_assistant="$value"
+      ;;
+    auto_launch)
+      _cwt_config_auto_launch="$value"
+      ;;
+    launch_target)
+      _cwt_config_launch_target="$value"
+      ;;
+    permission_mode)
+      _cwt_config_permission_mode="$value"
+      ;;
+    cmd_claude)
+      _cwt_config_cmd_claude="$value"
+      ;;
+    cmd_codex)
+      _cwt_config_cmd_codex="$value"
+      ;;
+    cmd_gemini)
+      _cwt_config_cmd_gemini="$value"
+      ;;
+  esac
+}
+
+_cwt_load_yaml_config() {
   local config_file
+  local line
+  local section=""
+  local key
+  local value
+  local current_git_root=""
+  local current_worktree_dir=""
+
   config_file=$(_cwt_config_file_path)
-  [[ -f "$config_file" ]] && source "$config_file"
+  [[ -f "$config_file" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "defaults:")
+        section="defaults"
+        current_git_root=""
+        ;;
+      "projects:")
+        section="projects"
+        current_git_root=""
+        ;;
+      "  - git_root: "*)
+        [[ "$section" == "projects" ]] || continue
+        current_git_root="$(_cwt_yaml_unquote "${line#"  - git_root: "}")"
+        current_git_root="${current_git_root:A}"
+        ;;
+      "    worktree_dir: "*)
+        [[ "$section" == "projects" ]] || continue
+        [[ -n "$current_git_root" ]] || continue
+        current_worktree_dir=$(_cwt_yaml_unquote "${line#"    worktree_dir: "}")
+        _cwt_project_worktree_dirs[$current_git_root]="$current_worktree_dir"
+        current_git_root=""
+        ;;
+      "  "*": "*)
+        if [[ "$section" == "defaults" ]]; then
+          key="${line#  }"
+          key="${key%%:*}"
+          value=$(_cwt_yaml_unquote "${line#*: }")
+          _cwt_assign_loaded_setting "$key" "$value"
+        fi
+        ;;
+    esac
+  done < "$config_file"
+}
+
+_cwt_load_legacy_global_config() {
+  local config_file
+  local line
+  local key
+  local value
+
+  config_file=$(_cwt_config_file_path)
+  [[ -f "$config_file" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      export\ *)
+        line="${line#export }"
+        ;;
+    esac
+
+    case "$line" in
+      CWT_[A-Z_]*=*)
+        key="${line%%=*}"
+        value="${(Q)${line#*=}}"
+        case "$key" in
+          CWT_WORKTREE_DIR)
+            _cwt_legacy_global_worktree_dir="$value"
+            ;;
+          CWT_DEFAULT_BASE_BRANCH)
+            _cwt_config_default_base_branch="$value"
+            ;;
+          CWT_DEFAULT_ASSISTANT)
+            _cwt_config_default_assistant="$value"
+            ;;
+          CWT_AUTO_LAUNCH)
+            _cwt_config_auto_launch="$value"
+            ;;
+          CWT_LAUNCH_TARGET)
+            _cwt_config_launch_target="$value"
+            ;;
+          CWT_PERMISSION_MODE)
+            _cwt_config_permission_mode="$value"
+            ;;
+          CWT_CMD_CLAUDE)
+            _cwt_config_cmd_claude="$value"
+            ;;
+          CWT_CMD_CODEX)
+            _cwt_config_cmd_codex="$value"
+            ;;
+          CWT_CMD_GEMINI)
+            _cwt_config_cmd_gemini="$value"
+            ;;
+        esac
+        ;;
+    esac
+  done < "$config_file"
+}
+
+_cwt_load_project_config() {
+  _cwt_reset_loaded_config
+
+  _cwt_load_yaml_config
+  _cwt_load_legacy_global_config
+
+  if [[ -n "${_cwt_project_worktree_dirs[$_cwt_git_root]-}" ]]; then
+    _cwt_project_worktree_dir="${_cwt_project_worktree_dirs[$_cwt_git_root]}"
+    _cwt_current_project_has_config=1
+  fi
 }
 
 _cwt_is_interactive() {
@@ -156,8 +356,8 @@ _cwt_relative_path_from() {
   fi
 }
 
-_cwt_resolve_worktrees_dir() {
-  local configured_dir="${CWT_WORKTREE_DIR:-}"
+_cwt_resolve_worktree_dir_value() {
+  local configured_dir="$1"
   local resolved_dir
 
   if [[ -z "$configured_dir" ]]; then
@@ -182,9 +382,17 @@ _cwt_resolve_worktrees_dir() {
   print -r -- "${resolved_dir:A}"
 }
 
+_cwt_resolve_worktrees_dir() {
+  _cwt_resolve_worktree_dir_value "${CWT_WORKTREE_DIR:-${_cwt_project_worktree_dir:-}}"
+}
+
 _cwt_worktrees_config_value() {
   local worktrees_dir="${1:A}"
   print -r -- "$(_cwt_relative_path_from "$_cwt_git_root" "$worktrees_dir")"
+}
+
+_cwt_default_worktrees_config_value() {
+  _cwt_worktrees_config_value "${_cwt_git_root}/.worktrees"
 }
 
 _cwt_validate_worktrees_dir() {
@@ -380,21 +588,69 @@ _cwt_browse_for_worktree_root() {
 _cwt_write_setup_config() {
   local config_file="$1"
   local config_value="$2"
+  local git_root
+  local -a git_roots=()
+  local -a default_keys=()
+  local -a default_values=()
+  local index
 
   mkdir -p "${config_file:h}" 2>/dev/null || {
     _cwt_log_warn "Could not create $(_cwt_bold "${config_file:h}")."
     return 1
   }
 
+  _cwt_project_worktree_dirs[$_cwt_git_root]="$config_value"
+  git_roots=("${(@Qok)_cwt_project_worktree_dirs}")
+
+  [[ -n "$_cwt_config_default_base_branch" ]] && {
+    default_keys+=("default_base_branch")
+    default_values+=("$_cwt_config_default_base_branch")
+  }
+  [[ -n "$_cwt_config_default_assistant" ]] && {
+    default_keys+=("default_assistant")
+    default_values+=("$_cwt_config_default_assistant")
+  }
+  [[ -n "$_cwt_config_auto_launch" ]] && {
+    default_keys+=("auto_launch")
+    default_values+=("$_cwt_config_auto_launch")
+  }
+  [[ -n "$_cwt_config_launch_target" ]] && {
+    default_keys+=("launch_target")
+    default_values+=("$_cwt_config_launch_target")
+  }
+  [[ -n "$_cwt_config_permission_mode" ]] && {
+    default_keys+=("permission_mode")
+    default_values+=("$_cwt_config_permission_mode")
+  }
+  [[ -n "$_cwt_config_cmd_claude" ]] && {
+    default_keys+=("cmd_claude")
+    default_values+=("$_cwt_config_cmd_claude")
+  }
+  [[ -n "$_cwt_config_cmd_codex" ]] && {
+    default_keys+=("cmd_codex")
+    default_values+=("$_cwt_config_cmd_codex")
+  }
+  [[ -n "$_cwt_config_cmd_gemini" ]] && {
+    default_keys+=("cmd_gemini")
+    default_values+=("$_cwt_config_cmd_gemini")
+  }
+
   {
     print -r -- "# cwt config"
-    print -r -- "# Created by the cwt first-run setup wizard."
+    print -r -- "# Project-scoped worktree roots and defaults. Created by cwt."
     print -r -- ""
-    if [[ -n "$config_value" ]]; then
-      printf "CWT_WORKTREE_DIR=%q\n" "$config_value"
-    else
-      print -r -- "# Using the default worktree root under <git-root>/.worktrees"
+    print -r -- "version: 1"
+    if (( ${#default_keys[@]} > 0 )); then
+      print -r -- "defaults:"
+      for (( index = 1; index <= ${#default_keys[@]}; index++ )); do
+        print -r -- "  ${default_keys[$index]}: $(_cwt_yaml_quote "${default_values[$index]}")"
+      done
     fi
+    print -r -- "projects:"
+    for git_root in "${git_roots[@]}"; do
+      print -r -- "  - git_root: $(_cwt_yaml_quote "$git_root")"
+      print -r -- "    worktree_dir: $(_cwt_yaml_quote "${_cwt_project_worktree_dirs[$git_root]}")"
+    done
   } >| "$config_file" 2>/dev/null || {
     _cwt_log_warn "Could not write $(_cwt_bold "$config_file")."
     return 1
@@ -405,11 +661,8 @@ _cwt_apply_setup_choice() {
   local config_value="$1"
   local config_file="$2"
 
-  if [[ -n "$config_value" ]]; then
-    CWT_WORKTREE_DIR="$config_value"
-  else
-    unset CWT_WORKTREE_DIR
-  fi
+  _cwt_project_worktree_dir="$config_value"
+  _cwt_current_project_has_config=1
 
   _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
   _cwt_validate_worktrees_dir "$_cwt_worktrees_dir" || return 1
@@ -424,21 +677,18 @@ _cwt_apply_setup_choice() {
 }
 
 _cwt_should_run_setup_wizard() {
-  local config_file
-  config_file=$(_cwt_config_file_path)
-
   [[ -n "${CWT_SKIP_SETUP_WIZARD:-}" ]] && return 1
-  [[ -n "${CWT_WORKTREE_DIR:-}" ]] && return 1
-  [[ -f "$config_file" ]] && return 1
-
   [[ "${CWT_FORCE_SETUP_WIZARD:-0}" == "1" ]] && return 0
+  [[ -n "${CWT_WORKTREE_DIR:-}" ]] && return 1
+  [[ "${_cwt_current_project_has_config:-0}" == "1" ]] && return 1
+
   _cwt_is_interactive
 }
 
 _cwt_maybe_run_setup_wizard() {
   local config_file
   local default_root="${_cwt_git_root}/.worktrees"
-  local config_value=""
+  local config_value="$(_cwt_default_worktrees_config_value)"
   local custom_root
   local browse_status
   local choice
@@ -453,14 +703,20 @@ _cwt_maybe_run_setup_wizard() {
   config_file=$(_cwt_config_file_path)
 
   echo "" >&2
-  _cwt_log_info "No cwt config found."
+  _cwt_log_info "No cwt config found for this project."
   _cwt_log_item "Project: $(_cwt_bold "$_cwt_git_root")"
   _cwt_log_item "Recommended worktree root: $(_cwt_dim "$default_root")"
   _cwt_log_item "Config file: $(_cwt_dim "$config_file")"
 
   if _cwt_confirm "Use the recommended location?" "y"; then
-    _cwt_apply_setup_choice "" "$config_file" || return 1
+    _cwt_apply_setup_choice "$config_value" "$config_file" || return 1
     return 0
+  fi
+
+  if [[ -n "$_cwt_legacy_global_worktree_dir" ]]; then
+    option_kinds+=("legacy")
+    option_values+=("$_cwt_legacy_global_worktree_dir")
+    option_labels+=("Use the legacy cwt setting for this project: ${_cwt_legacy_global_worktree_dir}")
   fi
 
   while IFS='|' read -r detected_label detected_path; do
@@ -494,8 +750,8 @@ _cwt_maybe_run_setup_wizard() {
     fi
 
     case "${option_kinds[$choice]}" in
-      default)
-        _cwt_apply_setup_choice "" "$config_file" || return 1
+      legacy)
+        _cwt_apply_setup_choice "${option_values[$choice]}" "$config_file" || return 1
         return 0
         ;;
       detected)
@@ -544,6 +800,7 @@ _cwt_require_git() {
     _cwt_git_root="${git_common_dir:h}"
   fi
 
+  _cwt_load_project_config
   _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
   _cwt_validate_worktrees_dir "$_cwt_worktrees_dir" || return 1
 }
@@ -646,7 +903,7 @@ _cwt_select_worktree_interactive() {
 }
 
 _cwt_default_assistant() {
-  echo "${${CWT_DEFAULT_ASSISTANT:-claude}:l}"
+  echo "${${CWT_DEFAULT_ASSISTANT:-${_cwt_config_default_assistant:-claude}}:l}"
 }
 
 _cwt_is_valid_assistant() {
@@ -673,7 +930,7 @@ _cwt_assistant_default_candidates() {
 }
 
 _cwt_default_launch_target() {
-  echo "${${CWT_LAUNCH_TARGET:-current}:l}"
+  echo "${${CWT_LAUNCH_TARGET:-${_cwt_config_launch_target:-current}}:l}"
 }
 
 _cwt_is_valid_launch_target() {
@@ -684,7 +941,39 @@ _cwt_is_valid_launch_target() {
 }
 
 _cwt_default_permission_mode() {
-  echo "${${CWT_PERMISSION_MODE:-default}:l}"
+  echo "${${CWT_PERMISSION_MODE:-${_cwt_config_permission_mode:-default}}:l}"
+}
+
+_cwt_default_base_branch() {
+  print -r -- "${CWT_DEFAULT_BASE_BRANCH:-${_cwt_config_default_base_branch:-}}"
+}
+
+_cwt_auto_launch_enabled() {
+  local auto_launch="${${CWT_AUTO_LAUNCH:-${_cwt_config_auto_launch:-true}}:l}"
+  [[ "$auto_launch" != "false" ]]
+}
+
+_cwt_configured_assistant_cmd() {
+  local assistant="${1:l}"
+  local env_var="$(_cwt_assistant_env_var_name "$assistant")"
+  local env_value="${(P)env_var}"
+
+  [[ -n "$env_value" ]] && {
+    print -r -- "$env_value"
+    return 0
+  }
+
+  case "$assistant" in
+    claude)
+      print -r -- "$_cwt_config_cmd_claude"
+      ;;
+    codex)
+      print -r -- "$_cwt_config_cmd_codex"
+      ;;
+    gemini)
+      print -r -- "$_cwt_config_cmd_gemini"
+      ;;
+  esac
 }
 
 _cwt_is_valid_permission_mode() {
@@ -856,8 +1145,10 @@ _cwt_command_exists() {
 _cwt_resolve_assistant_cmd() {
   local assistant="${1:l}"
   local env_var="$(_cwt_assistant_env_var_name "$assistant")"
-  local custom_cmd="${(P)env_var}"
+  local custom_cmd
   local -a tried=()
+
+  custom_cmd=$(_cwt_configured_assistant_cmd "$assistant")
 
   if [[ -n "$custom_cmd" ]]; then
     tried+=("$custom_cmd")
@@ -985,7 +1276,7 @@ _cwt_launch_assistant() {
 }
 
 _cwt_ensure_default_worktree_ignored() {
-  [[ -n "$CWT_WORKTREE_DIR" ]] && return 0
+  [[ "$_cwt_worktrees_dir" != "${_cwt_git_root}/.worktrees" ]] && return 0
 
   local gitignore_path="${_cwt_git_root}/.gitignore"
   local ignore_entry=".worktrees/"
@@ -1027,7 +1318,7 @@ _cwt_ensure_default_worktree_ignored() {
 
 _cwt_new() {
   local no_launch=0
-  [[ "${CWT_AUTO_LAUNCH:-true}" == "false" ]] && no_launch=1
+  _cwt_auto_launch_enabled || no_launch=1
   local positional=()
 
   _cwt_reset_launch_parse_state
@@ -1158,9 +1449,7 @@ EOF
 
   # 2) Base branch selection
   local base_branch="${positional[2]}"
-  if [[ -z "$base_branch" && -n "$CWT_DEFAULT_BASE_BRANCH" ]]; then
-    base_branch="$CWT_DEFAULT_BASE_BRANCH"
-  fi
+  [[ -z "$base_branch" ]] && base_branch="$(_cwt_default_base_branch)"
   if [[ -z "$base_branch" ]]; then
     local branches=("HEAD" $(git -C "$_cwt_git_root" branch --format='%(refname:short)' 2>/dev/null))
     if ! _cwt_is_interactive; then
@@ -1224,7 +1513,7 @@ EOF
 
   # 4) Create worktree
   echo "" >&2
-  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+  if [[ "$_cwt_worktrees_dir" != "${_cwt_git_root}/.worktrees" ]]; then
     _cwt_log_info "Using custom worktree root: $(_cwt_bold "$_cwt_worktrees_dir")"
   fi
   _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."

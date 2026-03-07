@@ -329,50 +329,44 @@ cwt는 실행할 때마다 선택적 설정 파일을 읽습니다:
 ```
 
 경로를 변경하려면 `CWT_CONFIG=/path/to/config`를 설정하세요.
-아직 파일이 없다면 첫 대화형 실행에서 설정 마법사가 자동으로 만들어줍니다.
+현재 git 프로젝트에 cwt 설정이 없으면 첫 대화형 실행에서 그 프로젝트용 설정 마법사가 자동으로 열립니다.
 마법사는 기본 `.worktrees` 구조, 감지된 Claude/Codex worktree 폴더 재사용, 또는 git root의 부모부터 시작하는 커스텀 폴더 선택을 제공합니다.
 
 ### 설정 옵션
 
-```sh
+```yaml
 # ~/.config/cwt/config
 
-# 대화형 베이스 브랜치 프롬프트를 건너뛰고 항상 이 브랜치를 사용
-CWT_DEFAULT_BASE_BRANCH=main
+version: 1
 
-# cwt new/cd에서 실행 요청 시 사용할 기본 어시스턴트
-CWT_DEFAULT_ASSISTANT=claude
+defaults:
+  default_base_branch: 'main'
+  default_assistant: 'claude'
+  auto_launch: 'false'
+  launch_target: 'current'
+  permission_mode: 'default'
+  cmd_claude: 'claude'
+  cmd_codex: 'codex'
+  cmd_gemini: 'gemini'
 
-# "false"로 설정하면 cwt new 후 기본적으로 실행 건너뛰기 (--no-launch과 동일)
-CWT_AUTO_LAUNCH=false
-
-# 어시스턴트 시작 시 기본 실행 대상
-# current, split, tab 중 하나
-CWT_LAUNCH_TARGET=current
-
-# 실행 시 기본 어시스턴트 권한 모드
-# default, full 중 하나
-CWT_PERMISSION_MODE=default
-
-# 커스텀 worktree 디렉토리 (기본값: <git-root>/.worktrees)
-# 상대 경로는 메인 git root 기준으로 해석
-CWT_WORKTREE_DIR=../projectA-worktrees
-
-# 명령어 오버라이드 (선택)
-CWT_CMD_CLAUDE=claude
-CWT_CMD_CODEX=codex
-CWT_CMD_GEMINI=gemini
+projects:
+  - git_root: '/Users/you/src/project-a'
+    worktree_dir: '../project-a-worktrees'
+  - git_root: '/Users/you/src/project-b'
+    worktree_dir: '.worktrees'
 ```
 
 모든 옵션은 선택 사항입니다. 설정하지 않은 값은 기본 동작을 유지합니다.
-`CWT_WORKTREE_DIR`는 절대 경로도 사용할 수 있고, 상대 경로를 쓰면 `cwt`를 실행한 현재 위치가 아니라 메인 git root 기준으로 해석합니다.
+`defaults` 블록은 전역 기본값이고, `projects[*].worktree_dir`는 git root별로 분리되어 저장됩니다. 그래서 다른 저장소가 같은 상대 경로를 우연히 공유하지 않습니다.
+project `worktree_dir`는 절대 경로도 사용할 수 있고, 상대 경로를 쓰면 `cwt`를 실행한 현재 위치가 아니라 메인 git root 기준으로 해석합니다.
 안전을 위해 `/`, git root 자체, `.git` 내부처럼 명백히 위험한 위치는 거부합니다.
 커스텀 worktree 루트를 쓰는 경우 `cwt new`는 생성 전에 해석된 실제 경로를 먼저 보여줍니다.
+이전 shell-style 설정 파일도 하위 호환으로 읽어들이며, 다음에 마법사가 저장할 때 YAML로 다시 써줍니다.
 
 ## 동작 원리
 
 기본적으로 worktree는 `<project>/.worktrees/<name>` 아래에 생성됩니다.
-`CWT_WORKTREE_DIR`를 설정하면 그 디렉토리를 사용하고, 생성 전에 해석된 실제 루트를 먼저 보여줍니다.
+현재 프로젝트에 `worktree_dir`가 설정되어 있으면 그 디렉토리를 사용하고, 생성 전에 해석된 실제 루트를 먼저 보여줍니다.
 각 worktree는 새 브랜치(`wt/<name>-<rand>` 형식)를 가지며, `.worktreeinclude`에 나열된 파일을 선택적으로 복사합니다. 설정이 완료되면 선택된 어시스턴트 명령이 worktree 디렉토리에서 실행됩니다.
 
 ## 요구사항

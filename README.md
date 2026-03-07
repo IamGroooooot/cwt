@@ -329,50 +329,44 @@ cwt reads an optional config file on each invocation:
 ```
 
 Override the path with `CWT_CONFIG=/path/to/config`.
-If the file does not exist yet, the first interactive run can create it for you.
-The setup wizard offers the default `.worktrees` layout, detected Claude or Codex worktree folders when they exist, or a custom directory picker that starts from the parent of your git root.
+If the current git project does not have a cwt entry yet, the first interactive run opens a setup wizard for that project.
+The wizard offers the default `.worktrees` layout, detected Claude or Codex worktree folders when they exist, or a custom directory picker that starts from the parent of your git root.
 
 ### Available options
 
-```sh
+```yaml
 # ~/.config/cwt/config
 
-# Skip the interactive base-branch prompt and always use this branch
-CWT_DEFAULT_BASE_BRANCH=main
+version: 1
 
-# Default assistant used by cwt new/cd when launch is requested
-CWT_DEFAULT_ASSISTANT=claude
+defaults:
+  default_base_branch: 'main'
+  default_assistant: 'claude'
+  auto_launch: 'false'
+  launch_target: 'current'
+  permission_mode: 'default'
+  cmd_claude: 'claude'
+  cmd_codex: 'codex'
+  cmd_gemini: 'gemini'
 
-# Set to "false" to skip launching after cwt new by default (same as --no-launch)
-CWT_AUTO_LAUNCH=false
-
-# Default launch target for assistant startup
-# one of: current, split, tab
-CWT_LAUNCH_TARGET=current
-
-# Default assistant permission mode when launching
-# one of: default, full
-CWT_PERMISSION_MODE=default
-
-# Custom worktree directory (default: <git-root>/.worktrees)
-# Relative paths are resolved from the main git root.
-CWT_WORKTREE_DIR=../projectA-worktrees
-
-# Optional command overrides
-CWT_CMD_CLAUDE=claude
-CWT_CMD_CODEX=codex
-CWT_CMD_GEMINI=gemini
+projects:
+  - git_root: '/Users/you/src/project-a'
+    worktree_dir: '../project-a-worktrees'
+  - git_root: '/Users/you/src/project-b'
+    worktree_dir: '.worktrees'
 ```
 
 All options are optional. Unset values keep the default behavior.
-`CWT_WORKTREE_DIR` accepts absolute paths too, but relative paths are resolved from the main git root, not from the directory where you run `cwt`.
+The `defaults` block is global, but `projects[*].worktree_dir` is scoped per git root so different repositories do not share the same relative path by accident.
+Project `worktree_dir` values accept absolute paths too, but relative paths are resolved from the main git root, not from the directory where you run `cwt`.
 For safety, cwt rejects obviously unsafe destinations such as `/`, the git root itself, or anything inside `.git`.
 When a custom worktree root is active, `cwt new` prints the resolved destination before creating anything.
+Legacy shell-style config lines are still read for backward compatibility and are rewritten as YAML the next time the setup wizard saves the file.
 
 ## How it works
 
 By default, worktrees are created under `<project>/.worktrees/<name>`.
-If `CWT_WORKTREE_DIR` is set, cwt uses that directory instead and shows the resolved root before creation.
+If the current project has a configured `worktree_dir`, cwt uses that directory instead and shows the resolved root before creation.
 Each worktree gets a new branch (`wt/<name>-<rand>` by default) and can copy files listed in `.worktreeinclude`. After setup, the selected assistant command is launched in the worktree directory.
 
 ## Requirements
