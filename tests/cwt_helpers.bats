@@ -413,6 +413,24 @@ EOF
 	[[ "$output" == *"resolved_dir=$expected_dir"* ]]
 }
 
+@test "sourcing cwt after compinit registers completion and completion path" {
+	local expected_completion_dir
+	expected_completion_dir="$(cd "$PROJECT_DIR/completions" && pwd -P)"
+
+	run zsh -c "
+    export NO_COLOR=1
+    autoload -Uz compinit
+    compinit -D
+    source '$CWT_SH'
+    echo \"mapping=\${_comps[cwt]-<none>}\"
+    echo \"has_completion_dir=\$(( \${fpath[(Ie)$expected_completion_dir]} > 0 ))\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"mapping=_cwt"* ]]
+	[[ "$output" == *"has_completion_dir=1"* ]]
+}
+
 @test "_cwt_is_valid_assistant: accepts supported assistants" {
 	run zsh -c "
     export NO_COLOR=1

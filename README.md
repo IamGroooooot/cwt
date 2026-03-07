@@ -322,6 +322,8 @@ Place a `.worktreeinclude` file in your project root to auto-copy files into new
 config/*.secret.json
 ```
 
+Entries must stay inside the repository. `cwt` skips parent-path escapes and symlinks that resolve outside the repo.
+
 ## Configuration
 
 cwt reads an optional config file on each invocation:

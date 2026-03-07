@@ -421,6 +421,46 @@ EOF
 	[ "$output" = "committed" ]
 }
 
+@test "cwt new: .worktreeinclude rejects parent-path escapes outside the repo" {
+	echo "safe" >"$REPO_DIR/keep.txt"
+	echo "leak" >"$TEST_TMPDIR/outside.txt"
+	cat >"$REPO_DIR/.worktreeinclude" <<'EOF'
+../outside.txt
+keep.txt
+EOF
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-outside HEAD
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *".worktreeinclude skipped path outside repo: ../outside.txt"* ]]
+	[ -f "$REPO_DIR/.worktrees/include-outside/keep.txt" ]
+	[ ! -e "$REPO_DIR/.worktrees/outside.txt" ]
+}
+
+@test "cwt new: .worktreeinclude rejects symlinks that resolve outside the repo" {
+	echo "secret" >"$TEST_TMPDIR/outside-secret.txt"
+	ln -s "$TEST_TMPDIR/outside-secret.txt" "$REPO_DIR/leak.txt"
+	cat >"$REPO_DIR/.worktreeinclude" <<'EOF'
+leak.txt
+EOF
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-symlink HEAD
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *".worktreeinclude skipped path outside repo: leak.txt"* ]]
+	[ ! -e "$REPO_DIR/.worktrees/include-symlink/leak.txt" ]
+}
+
 @test "cwt new: duplicate name returns error" {
 	# Create first worktree
 	zsh -c "

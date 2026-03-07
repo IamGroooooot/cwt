@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.23"
+CWT_VERSION="0.2.24"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -467,6 +467,12 @@ _cwt_effective_worktrees_config_value() {
   fi
 
   _cwt_default_worktrees_config_value
+}
+
+_cwt_path_is_within() {
+  local root="${1:A}"
+  local path="${2:A}"
+  [[ "$path" == "$root" || "$path" == "$root/"* ]]
 }
 
 _cwt_validate_worktrees_dir() {
@@ -1856,7 +1862,7 @@ EOF
     local pattern
     local trimmed_pattern
     local -a files
-    local src rel dst
+    local src src_path rel dst dst_path
 
     while IFS= read -r pattern || [[ -n "$pattern" ]]; do
       # Accept CRLF-formatted include files and ignore leading/trailing spaces.
@@ -1877,8 +1883,25 @@ EOF
 
       for src in "${files[@]}"; do
         [[ ! -e "$src" ]] && continue
-        rel="${src#${git_root}/}"
+        src_path="${src:A}"
+        if ! _cwt_path_is_within "$git_root" "$src_path"; then
+          _cwt_log_warn ".worktreeinclude skipped path outside repo: $trimmed_pattern"
+          continue
+        fi
+
+        rel="${src_path#${git_root}/}"
+        if [[ -z "$rel" || "$rel" == "$src_path" ]]; then
+          _cwt_log_warn ".worktreeinclude skipped unsupported entry: $trimmed_pattern"
+          continue
+        fi
+
         dst="${worktree_path}/${rel}"
+        dst_path="${dst:A}"
+        if ! _cwt_path_is_within "$worktree_path" "$dst_path"; then
+          _cwt_log_warn ".worktreeinclude skipped destination outside worktree: $rel"
+          continue
+        fi
+
         if [[ -e "$dst" || -L "$dst" ]]; then
           _cwt_log_warn ".worktreeinclude skipped existing destination: $rel"
           continue
@@ -2729,3 +2752,34 @@ EOF
       ;;
   esac
 }
+
+_cwt_completion_dir() {
+  local cwt_file="${functions_source[cwt]-}"
+  local completion_dir
+
+  [[ -n "$cwt_file" ]] || return 1
+  completion_dir="${cwt_file:A:h}/completions"
+  [[ -d "$completion_dir" ]] || return 1
+  print -r -- "$completion_dir"
+}
+
+_cwt_ensure_completion_path() {
+  local completion_dir entry
+
+  completion_dir=$(_cwt_completion_dir) || return 1
+  for entry in "${fpath[@]}"; do
+    [[ "${entry:A}" == "$completion_dir" ]] && return 0
+  done
+
+  fpath=("$completion_dir" $fpath)
+}
+
+_cwt_register_completion() {
+  _cwt_ensure_completion_path || return 0
+  (( $+functions[compdef] )) || return 0
+
+  autoload -Uz _cwt
+  compdef _cwt cwt
+}
+
+_cwt_register_completion
