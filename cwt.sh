@@ -270,7 +270,8 @@ _cwt_is_interactive() {
 _cwt_can_use_fzf() {
   command -v fzf &>/dev/null || return 1
   [[ "${CWT_FORCE_FZF:-0}" == "1" ]] && return 0
-  [[ -t 0 && -t 1 && -t 2 ]]
+  # fzf can still render interactively when stdout is captured by command substitution.
+  [[ -t 0 && ( -t 1 || -t 2 ) ]]
 }
 
 _cwt_prompt_choice() {

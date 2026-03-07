@@ -154,6 +154,23 @@ teardown() {
 	[[ "$output" == *"Usage: cwt rm <name> [-f|--force]"* ]]
 }
 
+@test "cwt rm: selector helper can use fzf" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    _cwt_select_worktree_interactive 'Remove worktree > ' 'Select worktree to remove:' main rm-fzf other
+  "
+
+	[ "$status" -eq 0 ]
+	[ "$output" = "rm-fzf" ]
+}
+
 @test "cwt rm: non-interactive named remove requires --force" {
 	zsh -c "
     export NO_COLOR=1
