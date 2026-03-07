@@ -63,6 +63,78 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "cwt new: first-run wizard can save the default worktree root" {
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf '1\n' | cwt new --no-launch wizard-default HEAD
+  "
+
+  [ "$status" -eq 0 ]
+  [ -f "$XDG_CONFIG_HOME/cwt/config" ]
+  [[ "$output" == *"No cwt config found"* ]]
+  [[ "$output" == *"Saved cwt config"* ]]
+  run grep -q "CWT_WORKTREE_DIR" "$XDG_CONFIG_HOME/cwt/config"
+  [ "$status" -eq 1 ]
+  [ -d "$REPO_DIR/.worktrees/wizard-default" ]
+}
+
+@test "cwt new: first-run wizard can create a sibling worktree root" {
+  local expected_root
+  expected_root="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf '2\n1\n' | cwt new --no-launch wizard-sibling HEAD
+  "
+
+  [ "$status" -eq 0 ]
+  [ -f "$XDG_CONFIG_HOME/cwt/config" ]
+  [[ "$output" == *"Worktree root: $expected_root"* ]]
+  run grep -q "CWT_WORKTREE_DIR=\\.\\./repo-worktrees" "$XDG_CONFIG_HOME/cwt/config"
+  [ "$status" -eq 0 ]
+  [ -d "$expected_root/wizard-sibling" ]
+}
+
+@test "cwt new: first-run wizard can reuse Claude worktrees" {
+  mkdir -p "$REPO_DIR/.claude/worktrees"
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf '2\n' | cwt new --no-launch wizard-claude HEAD
+  "
+
+  [ "$status" -eq 0 ]
+  run grep -q "CWT_WORKTREE_DIR=\\.claude/worktrees" "$XDG_CONFIG_HOME/cwt/config"
+  [ "$status" -eq 0 ]
+  [ -d "$REPO_DIR/.claude/worktrees/wizard-claude" ]
+}
+
+@test "cwt new: first-run wizard can reuse Codex worktrees" {
+  mkdir -p "$REPO_DIR/.codex/worktrees"
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf '2\n' | cwt new --no-launch wizard-codex HEAD
+  "
+
+  [ "$status" -eq 0 ]
+  run grep -q "CWT_WORKTREE_DIR=\\.codex/worktrees" "$XDG_CONFIG_HOME/cwt/config"
+  [ "$status" -eq 0 ]
+  [ -d "$REPO_DIR/.codex/worktrees/wizard-codex" ]
+}
+
 @test "cwt new: relative CWT_WORKTREE_DIR in config resolves from git root" {
   mkdir -p "$XDG_CONFIG_HOME/cwt" "$REPO_DIR/apps/api"
   cat > "$XDG_CONFIG_HOME/cwt/config" << 'EOF'

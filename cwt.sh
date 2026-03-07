@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.12"
+CWT_VERSION="0.2.13"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -53,13 +53,46 @@ _cwt_log_item()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo "   $(_cwt_dim 
 
 # ── Config loader ─────────────────────────────────────────────────────────
 
+_cwt_config_file_path() {
+  print -r -- "${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
+}
+
 _cwt_load_config() {
-  local config_file="${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
+  local config_file
+  config_file=$(_cwt_config_file_path)
   [[ -f "$config_file" ]] && source "$config_file"
 }
 
 _cwt_is_interactive() {
   [[ -t 0 ]]
+}
+
+_cwt_prompt_choice() {
+  local prompt="$1"
+  local default_choice="$2"
+  local choice
+
+  echo -n "$(_cwt_cyan '?') $prompt" >&2
+  IFS= read -r choice
+  [[ -z "$choice" ]] && choice="$default_choice"
+  print -r -- "$choice"
+}
+
+_cwt_confirm() {
+  local prompt="$1"
+  local default_answer="${2:-n}"
+  local choice
+
+  if [[ "$default_answer" == "y" ]]; then
+    choice=$(_cwt_prompt_choice "$prompt [Y/n]: " "y")
+  else
+    choice=$(_cwt_prompt_choice "$prompt [y/N]: " "n")
+  fi
+
+  case "${choice:l}" in
+    y|yes) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # ── Relative time helper ───────────────────────────────────────────────────
@@ -83,6 +116,45 @@ _cwt_relative_time() {
 }
 
 # ── Git context helper ─────────────────────────────────────────────────────
+
+_cwt_relative_path_from() {
+  local base_dir="${1:A}"
+  local target_dir="${2:A}"
+  local -a base_parts=()
+  local -a target_parts=()
+  local -a relative_parts=()
+  local common_parts=0
+  local index
+
+  [[ "$base_dir" == "$target_dir" ]] && {
+    print -r -- "."
+    return 0
+  }
+
+  [[ "$base_dir" != "/" ]] && base_parts=("${(@s:/:)${base_dir#/}}")
+  [[ "$target_dir" != "/" ]] && target_parts=("${(@s:/:)${target_dir#/}}")
+
+  while (( common_parts < ${#base_parts[@]} && common_parts < ${#target_parts[@]} )); do
+    if [[ "${base_parts[$((common_parts + 1))]}" != "${target_parts[$((common_parts + 1))]}" ]]; then
+      break
+    fi
+    ((common_parts++))
+  done
+
+  for (( index = common_parts + 1; index <= ${#base_parts[@]}; index++ )); do
+    relative_parts+=("..")
+  done
+
+  for (( index = common_parts + 1; index <= ${#target_parts[@]}; index++ )); do
+    relative_parts+=("${target_parts[$index]}")
+  done
+
+  if (( ${#relative_parts[@]} == 0 )); then
+    print -r -- "."
+  else
+    print -r -- "${(j:/:)relative_parts}"
+  fi
+}
 
 _cwt_resolve_worktrees_dir() {
   local configured_dir="${CWT_WORKTREE_DIR:-}"
@@ -110,6 +182,11 @@ _cwt_resolve_worktrees_dir() {
   print -r -- "${resolved_dir:A}"
 }
 
+_cwt_worktrees_config_value() {
+  local worktrees_dir="${1:A}"
+  print -r -- "$(_cwt_relative_path_from "$_cwt_git_root" "$worktrees_dir")"
+}
+
 _cwt_validate_worktrees_dir() {
   local worktrees_dir="$1"
 
@@ -130,6 +207,267 @@ _cwt_validate_worktrees_dir() {
     _cwt_log_item "Use a normal directory outside git metadata, for example $(_cwt_bold '../projectA-worktrees')."
     return 1
   fi
+}
+
+_cwt_print_detected_worktree_roots() {
+  local candidate label path
+  local -a detected_paths=()
+
+  for candidate in \
+    "Reuse existing Claude worktrees|${_cwt_git_root}/.claude/worktrees" \
+    "Reuse existing Codex worktrees|${_cwt_git_root}/.codex/worktrees"
+  do
+    label="${candidate%%|*}"
+    path="${candidate#*|}"
+
+    [[ -d "$path" ]] || continue
+    [[ " ${detected_paths[*]} " == *" $path "* ]] && continue
+
+    detected_paths+=("$path")
+    print -r -- "${label}|${path:A}"
+  done
+}
+
+_cwt_browse_for_worktree_root() {
+  local browse_dir="${_cwt_git_root:h}"
+  local repo_name="${_cwt_git_root:t}"
+  local suggested_dir choice folder_name chosen_dir
+  local -a child_dirs=()
+  local -a action_kinds=()
+  local -a action_values=()
+  local -a action_labels=()
+  local index
+
+  while true; do
+    suggested_dir="${browse_dir}/${repo_name}-worktrees"
+    child_dirs=("$browse_dir"/*(/N))
+    action_kinds=()
+    action_values=()
+    action_labels=()
+
+    action_kinds+=("suggested")
+    action_values+=("$suggested_dir")
+    action_labels+=("Create or use $suggested_dir")
+
+    action_kinds+=("current")
+    action_values+=("$browse_dir")
+    if [[ "$browse_dir" == "${_cwt_git_root:h}" ]]; then
+      action_labels+=("Use $browse_dir directly (not recommended)")
+    else
+      action_labels+=("Use $browse_dir as the worktree root")
+    fi
+
+    action_kinds+=("create")
+    action_values+=("$browse_dir")
+    action_labels+=("Create another folder here")
+
+    if [[ "$browse_dir" != "/" ]]; then
+      action_kinds+=("up")
+      action_values+=("${browse_dir:h}")
+      action_labels+=("Go up to ${browse_dir:h}")
+    fi
+
+    for chosen_dir in "${child_dirs[@]}"; do
+      action_kinds+=("enter")
+      action_values+=("$chosen_dir")
+      action_labels+=("Browse ${chosen_dir:t}/")
+    done
+
+    action_kinds+=("cancel")
+    action_values+=("")
+    action_labels+=("Cancel")
+
+    echo "" >&2
+    _cwt_log_info "Choose a folder for this project's worktrees."
+    _cwt_log_item "Current location: $browse_dir"
+    index=1
+    for choice in "${action_labels[@]}"; do
+      echo "   $(_cwt_dim "$index)") $choice" >&2
+      ((index++))
+    done
+
+    choice=$(_cwt_prompt_choice "Choose a folder action [1]: " "1")
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#action_kinds[@]} )); then
+      _cwt_log_error "Invalid selection."
+      continue
+    fi
+
+    case "${action_kinds[$choice]}" in
+      suggested)
+        chosen_dir="${action_values[$choice]}"
+        ;;
+      current)
+        chosen_dir="${action_values[$choice]}"
+        if [[ "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
+          _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
+        fi
+        ;;
+      create)
+        folder_name=$(_cwt_prompt_choice "Folder name relative to $browse_dir: " "${repo_name}-worktrees")
+        [[ -z "$folder_name" ]] && {
+          _cwt_log_error "Folder name is required."
+          continue
+        }
+        chosen_dir="${browse_dir}/${folder_name}"
+        ;;
+      up)
+        browse_dir="${action_values[$choice]}"
+        continue
+        ;;
+      enter)
+        browse_dir="${action_values[$choice]}"
+        continue
+        ;;
+      cancel)
+        return 1
+        ;;
+    esac
+
+    chosen_dir="${chosen_dir:A}"
+    _cwt_validate_worktrees_dir "$chosen_dir" || continue
+    mkdir -p "$chosen_dir" 2>/dev/null || {
+      _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+      continue
+    }
+    print -r -- "$chosen_dir"
+    return 0
+  done
+}
+
+_cwt_write_setup_config() {
+  local config_file="$1"
+  local config_value="$2"
+
+  mkdir -p "${config_file:h}" 2>/dev/null || {
+    _cwt_log_warn "Could not create $(_cwt_bold "${config_file:h}")."
+    return 1
+  }
+
+  {
+    print -r -- "# cwt config"
+    print -r -- "# Created by the cwt first-run setup wizard."
+    print -r -- ""
+    if [[ -n "$config_value" ]]; then
+      printf "CWT_WORKTREE_DIR=%q\n" "$config_value"
+    else
+      print -r -- "# Using the default worktree root under <git-root>/.worktrees"
+    fi
+  } >| "$config_file" 2>/dev/null || {
+    _cwt_log_warn "Could not write $(_cwt_bold "$config_file")."
+    return 1
+  }
+}
+
+_cwt_apply_setup_choice() {
+  local config_value="$1"
+  local config_file="$2"
+
+  if [[ -n "$config_value" ]]; then
+    CWT_WORKTREE_DIR="$config_value"
+  else
+    unset CWT_WORKTREE_DIR
+  fi
+
+  _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
+  _cwt_validate_worktrees_dir "$_cwt_worktrees_dir" || return 1
+
+  if _cwt_write_setup_config "$config_file" "$config_value"; then
+    _cwt_log_success "Saved cwt config to $(_cwt_bold "$config_file")."
+  else
+    _cwt_log_warn "Using this choice for the current command only."
+  fi
+
+  _cwt_log_item "Worktree root: $(_cwt_dim "$_cwt_worktrees_dir")"
+}
+
+_cwt_should_run_setup_wizard() {
+  local config_file
+  config_file=$(_cwt_config_file_path)
+
+  [[ -n "${CWT_SKIP_SETUP_WIZARD:-}" ]] && return 1
+  [[ -n "${CWT_WORKTREE_DIR:-}" ]] && return 1
+  [[ -f "$config_file" ]] && return 1
+
+  [[ "${CWT_FORCE_SETUP_WIZARD:-0}" == "1" ]] && return 0
+  _cwt_is_interactive
+}
+
+_cwt_maybe_run_setup_wizard() {
+  local config_file
+  local default_root="${_cwt_git_root}/.worktrees"
+  local config_value=""
+  local custom_root
+  local choice
+  local index
+  local -a option_kinds=()
+  local -a option_labels=()
+  local -a option_values=()
+  local detected_line detected_label detected_path
+
+  _cwt_should_run_setup_wizard || return 0
+
+  config_file=$(_cwt_config_file_path)
+
+  echo "" >&2
+  _cwt_log_info "No cwt config found. Let's choose where this project's worktrees should live."
+  _cwt_log_item "Project: $(_cwt_bold "$_cwt_git_root")"
+  _cwt_log_item "Config file: $(_cwt_dim "$config_file")"
+
+  option_kinds+=("default")
+  option_values+=("")
+  option_labels+=("Recommended: use ${default_root}")
+
+  while IFS='|' read -r detected_label detected_path; do
+    [[ -z "$detected_label" || -z "$detected_path" ]] && continue
+    option_kinds+=("detected")
+    option_values+=("$detected_path")
+    option_labels+=("${detected_label}: ${detected_path}")
+  done < <(_cwt_print_detected_worktree_roots)
+
+  option_kinds+=("browse")
+  option_values+=("")
+  option_labels+=("Choose or create another worktree folder")
+
+  option_kinds+=("skip")
+  option_values+=("")
+  option_labels+=("Not now. Use the default for this run only")
+
+  while true; do
+    echo "" >&2
+    index=1
+    for choice in "${option_labels[@]}"; do
+      echo "   $(_cwt_dim "$index)") $choice" >&2
+      ((index++))
+    done
+
+    choice=$(_cwt_prompt_choice "Choose a setup option [1]: " "1")
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#option_kinds[@]} )); then
+      _cwt_log_error "Invalid selection."
+      continue
+    fi
+
+    case "${option_kinds[$choice]}" in
+      default)
+        _cwt_apply_setup_choice "" "$config_file" || return 1
+        return 0
+        ;;
+      detected)
+        config_value=$(_cwt_worktrees_config_value "${option_values[$choice]}")
+        _cwt_apply_setup_choice "$config_value" "$config_file" || return 1
+        return 0
+        ;;
+      browse)
+        custom_root=$(_cwt_browse_for_worktree_root) || continue
+        config_value=$(_cwt_worktrees_config_value "$custom_root")
+        _cwt_apply_setup_choice "$config_value" "$config_file" || return 1
+        return 0
+        ;;
+      skip)
+        _cwt_log_warn "Setup skipped. Using $(_cwt_bold "$default_root") for this run."
+        return 0
+        ;;
+    esac
+  done
 }
 
 _cwt_require_git() {
@@ -1568,6 +1906,7 @@ EOF
       ;;
     new|ls|cd|rm)
       _cwt_require_git || return 1
+      _cwt_maybe_run_setup_wizard || return 1
       shift
       "_cwt_${subcmd}" "$@"
       ;;

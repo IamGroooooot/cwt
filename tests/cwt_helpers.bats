@@ -71,6 +71,33 @@ teardown() {
   [ "$output" = "2w ago" ]
 }
 
+@test "_cwt_relative_path_from: returns sibling path" {
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_relative_path_from /tmp/project /tmp/project-worktrees
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "../project-worktrees" ]
+}
+
+@test "_cwt_print_detected_worktree_roots: lists Claude and Codex roots when present" {
+  create_test_repo
+  mkdir -p "$REPO_DIR/.claude/worktrees" "$REPO_DIR/.codex/worktrees"
+
+  run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    cd '$REPO_DIR'
+    _cwt_require_git
+    _cwt_print_detected_worktree_roots
+  "
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Reuse existing Claude worktrees|"* ]]
+  [[ "$output" == *"Reuse existing Codex worktrees|"* ]]
+}
+
 # ── _cwt_require_git ─────────────────────────────────────────────────
 
 @test "_cwt_require_git: fails outside a git repo" {

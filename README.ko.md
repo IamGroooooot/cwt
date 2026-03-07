@@ -19,6 +19,7 @@ worktree를 생성하고, 새 브랜치를 체크아웃하고, 설정 파일을 
 
 설치한 뒤 셸을 다시 읽고, git 저장소로 이동한 다음 `cwt new`를 실행하면 됩니다.
 기본적으로 `zsh`와 `git`이 필요하고, 어시스턴트 자동 실행이 필요할 때만 해당 CLI를 설치하면 됩니다.
+아직 `~/.config/cwt/config`가 없다면 첫 대화형 실행에서 이 프로젝트의 worktree를 어디에 둘지 짧게 안내합니다. 기본 `.worktrees` 구조를 그대로 쓰거나, 감지된 Claude/Codex worktree 폴더를 재사용하거나, 다른 폴더를 직접 골라 만들 수 있습니다.
 
 ```sh
 # 설치 (권장)
@@ -67,8 +68,9 @@ Homebrew로 설치한 뒤에는 caveats 출력에 따라 `.zshrc`가 Homebrew pr
 brew install --HEAD IamGroooooot/cwt/cwt
 
 # 현재 로컬 체크아웃 테스트 (커밋된 변경만 반영)
+brew untap IamGroooooot/cwt
 brew tap IamGroooooot/cwt "$(pwd)"
-brew reinstall --HEAD IamGroooooot/cwt/cwt
+brew install --HEAD IamGroooooot/cwt/cwt
 ```
 
 `brew install`은 최신 태그 릴리스를 설치하고, `--HEAD`는 현재 tap 체크아웃을 설치합니다.
@@ -328,6 +330,8 @@ cwt는 실행할 때마다 선택적 설정 파일을 읽습니다:
 ```
 
 경로를 변경하려면 `CWT_CONFIG=/path/to/config`를 설정하세요.
+아직 파일이 없다면 첫 대화형 실행에서 설정 마법사가 자동으로 만들어줍니다.
+마법사는 기본 `.worktrees` 구조, 감지된 Claude/Codex worktree 폴더 재사용, 또는 git root의 부모부터 시작하는 커스텀 폴더 선택을 제공합니다.
 
 ### 설정 옵션
 

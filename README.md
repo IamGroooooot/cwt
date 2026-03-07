@@ -19,6 +19,7 @@ Run `cwt` inside an existing git repository. Shell integration targets `zsh`.
 
 Install it, reload your shell, move into any git repository, and run `cwt new`.
 You need `zsh` and `git`; assistant CLIs are optional unless you want auto-launch.
+If `~/.config/cwt/config` does not exist yet, the first interactive run walks you through where to keep this project's worktrees. You can stick with the default `.worktrees` layout, reuse detected Claude or Codex worktree folders, or pick and create another folder.
 
 ```sh
 # install (recommended)
@@ -67,8 +68,9 @@ After installing via Homebrew, follow the caveats output so your `.zshrc` points
 brew install --HEAD IamGroooooot/cwt/cwt
 
 # test the current local checkout (committed changes only)
+brew untap IamGroooooot/cwt
 brew tap IamGroooooot/cwt "$(pwd)"
-brew reinstall --HEAD IamGroooooot/cwt/cwt
+brew install --HEAD IamGroooooot/cwt/cwt
 ```
 
 Use `brew install` for the latest tagged release and `--HEAD` for the current tap checkout.
@@ -328,6 +330,8 @@ cwt reads an optional config file on each invocation:
 ```
 
 Override the path with `CWT_CONFIG=/path/to/config`.
+If the file does not exist yet, the first interactive run can create it for you.
+The setup wizard offers the default `.worktrees` layout, detected Claude or Codex worktree folders when they exist, or a custom directory picker that starts from the parent of your git root.
 
 ### Available options
 
