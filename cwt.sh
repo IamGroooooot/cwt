@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.11"
+CWT_VERSION="0.2.12"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -84,7 +84,57 @@ _cwt_relative_time() {
 
 # ── Git context helper ─────────────────────────────────────────────────────
 
+_cwt_resolve_worktrees_dir() {
+  local configured_dir="${CWT_WORKTREE_DIR:-}"
+  local resolved_dir
+
+  if [[ -z "$configured_dir" ]]; then
+    resolved_dir="${_cwt_git_root}/.worktrees"
+  else
+    resolved_dir="$configured_dir"
+    case "$resolved_dir" in
+      "~")
+        resolved_dir="$HOME"
+        ;;
+      "~/"*)
+        resolved_dir="$HOME/${resolved_dir#~/}"
+        ;;
+      /*)
+        ;;
+      *)
+        resolved_dir="${_cwt_git_root}/${resolved_dir}"
+        ;;
+    esac
+  fi
+
+  print -r -- "${resolved_dir:A}"
+}
+
+_cwt_validate_worktrees_dir() {
+  local worktrees_dir="$1"
+
+  if [[ -z "$worktrees_dir" || "$worktrees_dir" == "/" ]]; then
+    _cwt_log_error "Unsafe worktree root: $(_cwt_bold "${worktrees_dir:-<empty>}")."
+    _cwt_log_item "Choose a dedicated directory such as $(_cwt_bold '../projectA-worktrees') or $(_cwt_bold '$HOME/worktrees/projectA')."
+    return 1
+  fi
+
+  if [[ "$worktrees_dir" == "$_cwt_git_root" ]]; then
+    _cwt_log_error "Custom worktree root cannot be the git root itself."
+    _cwt_log_item "Use a sibling or dedicated directory instead, for example $(_cwt_bold '../projectA-worktrees')."
+    return 1
+  fi
+
+  if [[ "$worktrees_dir" == "${_cwt_git_root}/.git" || "$worktrees_dir" == "${_cwt_git_root}/.git/"* ]]; then
+    _cwt_log_error "Custom worktree root cannot live inside $(_cwt_bold '.git')."
+    _cwt_log_item "Use a normal directory outside git metadata, for example $(_cwt_bold '../projectA-worktrees')."
+    return 1
+  fi
+}
+
 _cwt_require_git() {
+  local invocation_dir="${PWD:A}"
+
   _cwt_current_root=$(git rev-parse --show-toplevel 2>/dev/null)
   if [[ $? -ne 0 ]]; then
     _cwt_log_error "Not inside a git repository. Run cwt from within a git project."
@@ -99,13 +149,14 @@ _cwt_require_git() {
     _cwt_git_root="$_cwt_current_root"
   else
     if [[ "$git_common_dir" != /* ]]; then
-      git_common_dir="${_cwt_current_root}/${git_common_dir}"
+      git_common_dir="${invocation_dir}/${git_common_dir}"
     fi
     git_common_dir="${git_common_dir:A}"
     _cwt_git_root="${git_common_dir:h}"
   fi
 
-  _cwt_worktrees_dir="${CWT_WORKTREE_DIR:-${_cwt_git_root}/.worktrees}"
+  _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
+  _cwt_validate_worktrees_dir "$_cwt_worktrees_dir" || return 1
 }
 
 # Collect cwt-managed worktrees using git metadata instead of path globs.
@@ -784,6 +835,9 @@ EOF
 
   # 4) Create worktree
   echo "" >&2
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    _cwt_log_info "Using custom worktree root: $(_cwt_bold "$_cwt_worktrees_dir")"
+  fi
   _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."
 
   git -C "$_cwt_git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1

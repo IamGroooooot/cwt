@@ -352,7 +352,8 @@ CWT_LAUNCH_TARGET=current
 CWT_PERMISSION_MODE=default
 
 # Custom worktree directory (default: <git-root>/.worktrees)
-CWT_WORKTREE_DIR=
+# Relative paths are resolved from the main git root.
+CWT_WORKTREE_DIR=../projectA-worktrees
 
 # Optional command overrides
 CWT_CMD_CLAUDE=claude
@@ -361,10 +362,15 @@ CWT_CMD_GEMINI=gemini
 ```
 
 All options are optional. Unset values keep the default behavior.
+`CWT_WORKTREE_DIR` accepts absolute paths too, but relative paths are resolved from the main git root, not from the directory where you run `cwt`.
+For safety, cwt rejects obviously unsafe destinations such as `/`, the git root itself, or anything inside `.git`.
+When a custom worktree root is active, `cwt new` prints the resolved destination before creating anything.
 
 ## How it works
 
-Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branch (`wt/<name>-<rand>` by default) and optionally copies files listed in `.worktreeinclude`. After setup, the selected assistant command is launched in the worktree directory.
+By default, worktrees are created under `<project>/.worktrees/<name>`.
+If `CWT_WORKTREE_DIR` is set, cwt uses that directory instead and shows the resolved root before creation.
+Each worktree gets a new branch (`wt/<name>-<rand>` by default) and can copy files listed in `.worktreeinclude`. After setup, the selected assistant command is launched in the worktree directory.
 
 ## Requirements
 
@@ -376,13 +382,6 @@ Worktrees are created under `<project>/.worktrees/<name>`. Each gets a new branc
   - `codex`
   - `gemini` or `gemini-cli`
 - **tmux or zellij** *(optional, only for `--split`/`--tab`)*
-
-## Migration Notes
-
-- Default worktree directory is now `<git-root>/.worktrees` (was `.claude/worktrees`).
-- `--no-launch` replaces `--no-claude`.
-- `CWT_AUTO_LAUNCH` replaces `CWT_AUTO_CLAUDE`.
-- `cwt new/cd` now support `--assistant <claude|codex|gemini>` and shortcuts `--claude`, `--codex`, `--gemini`.
 
 ## Uninstall
 

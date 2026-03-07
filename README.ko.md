@@ -352,7 +352,8 @@ CWT_LAUNCH_TARGET=current
 CWT_PERMISSION_MODE=default
 
 # 커스텀 worktree 디렉토리 (기본값: <git-root>/.worktrees)
-CWT_WORKTREE_DIR=
+# 상대 경로는 메인 git root 기준으로 해석
+CWT_WORKTREE_DIR=../projectA-worktrees
 
 # 명령어 오버라이드 (선택)
 CWT_CMD_CLAUDE=claude
@@ -361,10 +362,15 @@ CWT_CMD_GEMINI=gemini
 ```
 
 모든 옵션은 선택 사항입니다. 설정하지 않은 값은 기본 동작을 유지합니다.
+`CWT_WORKTREE_DIR`는 절대 경로도 사용할 수 있고, 상대 경로를 쓰면 `cwt`를 실행한 현재 위치가 아니라 메인 git root 기준으로 해석합니다.
+안전을 위해 `/`, git root 자체, `.git` 내부처럼 명백히 위험한 위치는 거부합니다.
+커스텀 worktree 루트를 쓰는 경우 `cwt new`는 생성 전에 해석된 실제 경로를 먼저 보여줍니다.
 
 ## 동작 원리
 
-worktree는 `<project>/.worktrees/<name>` 아래에 생성됩니다. 각 worktree는 새 브랜치(`wt/<name>-<rand>` 형식)를 가지며, `.worktreeinclude`에 나열된 파일을 선택적으로 복사합니다. 설정이 완료되면 선택된 어시스턴트 명령이 worktree 디렉토리에서 실행됩니다.
+기본적으로 worktree는 `<project>/.worktrees/<name>` 아래에 생성됩니다.
+`CWT_WORKTREE_DIR`를 설정하면 그 디렉토리를 사용하고, 생성 전에 해석된 실제 루트를 먼저 보여줍니다.
+각 worktree는 새 브랜치(`wt/<name>-<rand>` 형식)를 가지며, `.worktreeinclude`에 나열된 파일을 선택적으로 복사합니다. 설정이 완료되면 선택된 어시스턴트 명령이 worktree 디렉토리에서 실행됩니다.
 
 ## 요구사항
 
@@ -376,13 +382,6 @@ worktree는 `<project>/.worktrees/<name>` 아래에 생성됩니다. 각 worktre
   - `codex`
   - `gemini` 또는 `gemini-cli`
 - **tmux 또는 zellij** *(선택, `--split`/`--tab` 전용)*
-
-## 마이그레이션 노트
-
-- 기본 worktree 디렉토리가 `<git-root>/.worktrees`로 변경 (이전: `.claude/worktrees`).
-- `--no-launch`가 `--no-claude`를 대체.
-- `CWT_AUTO_LAUNCH`가 `CWT_AUTO_CLAUDE`를 대체.
-- `cwt new/cd`에서 `--assistant <claude|codex|gemini>` 및 단축 옵션 `--claude`, `--codex`, `--gemini` 지원.
 
 ## 제거
 
