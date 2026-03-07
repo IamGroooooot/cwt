@@ -2776,10 +2776,14 @@ _cwt_ensure_completion_path() {
 
 _cwt_register_completion() {
   _cwt_ensure_completion_path || return 0
-  (( $+functions[compdef] )) || return 0
 
   autoload -Uz _cwt
-  compdef _cwt cwt
+  if (( $+functions[compdef] )); then
+    compdef _cwt cwt >/dev/null 2>&1 || true
+  fi
+  if (( ${+_comps} )); then
+    _comps[cwt]=_cwt
+  fi
 }
 
 _cwt_register_completion
