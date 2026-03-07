@@ -8,8 +8,45 @@ DIM=$(printf '\033[2m'); NC=$(printf '\033[0m')
 info() { printf " %s→%s %s\n" "$CYAN" "$NC" "$*"; }
 ok()   { printf " %s✓%s %s\n" "$GREEN" "$NC" "$*"; }
 
+resolve_target_dir() {
+  target="$1"
+  if [ -z "$target" ]; then
+    return 1
+  fi
+
+  if [ -d "$target" ]; then
+    (
+      cd "$target" 2>/dev/null && pwd -P
+    )
+    return $?
+  fi
+
+  target_parent=$(dirname "$target")
+  target_base=$(basename "$target")
+  resolved_parent=$(
+    cd "$target_parent" 2>/dev/null && pwd -P
+  ) || return 1
+
+  printf '%s/%s\n' "$resolved_parent" "$target_base"
+}
+
+ensure_safe_cwt_dir() {
+  resolved_cwt_dir=$(resolve_target_dir "$CWT_DIR") || {
+    info "Refusing to use unsafe CWT_DIR: $CWT_DIR"
+    exit 1
+  }
+
+  case "$resolved_cwt_dir" in
+    /|"$HOME")
+      info "Refusing to use unsafe CWT_DIR: $resolved_cwt_dir"
+      exit 1
+      ;;
+  esac
+}
+
 CWT_DIR="${CWT_DIR:-$HOME/.cwt}"
 ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
+ensure_safe_cwt_dir
 
 echo ""
 

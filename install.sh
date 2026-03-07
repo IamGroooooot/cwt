@@ -11,6 +11,42 @@ info()    { printf " %s→%s %s\n" "$CYAN" "$NC" "$*"; }
 ok()      { printf " %s✓%s %s\n" "$GREEN" "$NC" "$*"; }
 err()     { printf " %s✗%s %s\n" "$RED" "$NC" "$*" >&2; }
 
+resolve_target_dir() {
+  target="$1"
+  if [ -z "$target" ]; then
+    return 1
+  fi
+
+  if [ -d "$target" ]; then
+    (
+      cd "$target" 2>/dev/null && pwd -P
+    )
+    return $?
+  fi
+
+  target_parent=$(dirname "$target")
+  target_base=$(basename "$target")
+  resolved_parent=$(
+    cd "$target_parent" 2>/dev/null && pwd -P
+  ) || return 1
+
+  printf '%s/%s\n' "$resolved_parent" "$target_base"
+}
+
+ensure_safe_cwt_dir() {
+  resolved_cwt_dir=$(resolve_target_dir "$CWT_DIR") || {
+    err "Refusing to use unsafe CWT_DIR: $CWT_DIR"
+    exit 1
+  }
+
+  case "$resolved_cwt_dir" in
+    /|"$HOME")
+      err "Refusing to use unsafe CWT_DIR: $resolved_cwt_dir"
+      exit 1
+      ;;
+  esac
+}
+
 # ── Config ─────────────────────────────────────────────────────────
 CWT_DIR="${CWT_DIR:-$HOME/.cwt}"
 REPO="https://github.com/IamGroooooot/cwt.git"
@@ -32,6 +68,7 @@ done
 # ── Preflight ──────────────────────────────────────────────────────
 command -v git >/dev/null 2>&1 || { err "git is required. Install: apt install git / brew install git"; exit 1; }
 command -v zsh >/dev/null 2>&1 || { err "zsh is required. Install: apt install zsh / brew install zsh"; exit 1; }
+ensure_safe_cwt_dir
 
 # ── Install ────────────────────────────────────────────────────────
 echo ""
