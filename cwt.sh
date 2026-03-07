@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.21"
+CWT_VERSION="0.2.22"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -51,42 +51,96 @@ _cwt_log_info()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo " $(_cwt_cyan '
 _cwt_log_warn()    { echo " $(_cwt_yellow '!') $*" >&2; }
 _cwt_log_item()    { [[ ${CWT_QUIET:-0} -eq 1 ]] && return; echo "   $(_cwt_dim '•') $*" >&2; }
 
-# ── Config loader ─────────────────────────────────────────────────────────
+# ── Config model ──────────────────────────────────────────────────────────
 
-typeset -gA _cwt_project_worktree_dirs=()
-typeset -g _cwt_project_worktree_dir=""
-typeset -g _cwt_current_project_has_config=0
-typeset -g _cwt_legacy_global_worktree_dir=""
-typeset -g _cwt_config_default_base_branch=""
-typeset -g _cwt_config_default_assistant=""
-typeset -g _cwt_config_auto_launch=""
-typeset -g _cwt_config_launch_target=""
-typeset -g _cwt_config_permission_mode=""
-typeset -g _cwt_config_cmd_claude=""
-typeset -g _cwt_config_cmd_codex=""
-typeset -g _cwt_config_cmd_gemini=""
+typeset -ga _cwt_config_known_default_keys=(
+  default_base_branch
+  default_assistant
+  auto_launch
+  launch_target
+  permission_mode
+  cmd_claude
+  cmd_codex
+  cmd_gemini
+)
+typeset -gA _cwt_config_project_worktree_dirs=()
+typeset -gA _cwt_config_defaults=()
+typeset -g _cwt_config_current_project_worktree_dir=""
+typeset -g _cwt_config_legacy_worktree_dir=""
 
 _cwt_config_file_path() {
   print -r -- "${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
 }
 
 _cwt_reset_loaded_config() {
-  _cwt_project_worktree_dirs=()
-  _cwt_project_worktree_dir=""
-  _cwt_current_project_has_config=0
-  _cwt_legacy_global_worktree_dir=""
-  _cwt_config_default_base_branch=""
-  _cwt_config_default_assistant=""
-  _cwt_config_auto_launch=""
-  _cwt_config_launch_target=""
-  _cwt_config_permission_mode=""
-  _cwt_config_cmd_claude=""
-  _cwt_config_cmd_codex=""
-  _cwt_config_cmd_gemini=""
+  _cwt_config_project_worktree_dirs=()
+  _cwt_config_defaults=()
+  _cwt_config_current_project_worktree_dir=""
+  _cwt_config_legacy_worktree_dir=""
 }
 
 _cwt_load_config() {
   _cwt_reset_loaded_config
+}
+
+_cwt_set_config_default() {
+  local key="$1"
+  local value="$2"
+  [[ -n "$key" ]] || return 1
+  _cwt_config_defaults[$key]="$value"
+}
+
+_cwt_get_config_default() {
+  local key="$1"
+  print -r -- "${_cwt_config_defaults[$key]-}"
+}
+
+_cwt_is_known_default_setting() {
+  local key="$1"
+  local known_key
+
+  for known_key in "${_cwt_config_known_default_keys[@]}"; do
+    [[ "$known_key" == "$key" ]] && return 0
+  done
+  return 1
+}
+
+_cwt_bind_current_project_config() {
+  _cwt_config_current_project_worktree_dir="${_cwt_config_project_worktree_dirs[$_cwt_git_root]-}"
+}
+
+_cwt_has_project_config() {
+  [[ -n "$_cwt_config_current_project_worktree_dir" ]]
+}
+
+_cwt_get_effective_config_value() {
+  local env_var="$1"
+  local config_key="$2"
+  local fallback="${3-}"
+  local lowercase="${4:-0}"
+  local value="${(P)env_var}"
+
+  if [[ -z "$value" ]]; then
+    value=$(_cwt_get_config_default "$config_key")
+  fi
+
+  if [[ -z "$value" && $# -ge 3 ]]; then
+    value="$fallback"
+  fi
+
+  if [[ "$lowercase" == "1" ]]; then
+    value="${value:l}"
+  fi
+
+  print -r -- "$value"
+}
+
+_cwt_has_config_defaults() {
+  local key
+  for key in "${_cwt_config_known_default_keys[@]}"; do
+    [[ -n "$(_cwt_get_config_default "$key")" ]] && return 0
+  done
+  return 1
 }
 
 _cwt_yaml_quote() {
@@ -123,32 +177,8 @@ _cwt_assign_loaded_setting() {
   local key="$1"
   local value="$2"
 
-  case "$key" in
-    default_base_branch)
-      _cwt_config_default_base_branch="$value"
-      ;;
-    default_assistant)
-      _cwt_config_default_assistant="$value"
-      ;;
-    auto_launch)
-      _cwt_config_auto_launch="$value"
-      ;;
-    launch_target)
-      _cwt_config_launch_target="$value"
-      ;;
-    permission_mode)
-      _cwt_config_permission_mode="$value"
-      ;;
-    cmd_claude)
-      _cwt_config_cmd_claude="$value"
-      ;;
-    cmd_codex)
-      _cwt_config_cmd_codex="$value"
-      ;;
-    cmd_gemini)
-      _cwt_config_cmd_gemini="$value"
-      ;;
-  esac
+  _cwt_is_known_default_setting "$key" || return 0
+  _cwt_set_config_default "$key" "$value"
 }
 
 _cwt_load_yaml_config() {
@@ -182,7 +212,7 @@ _cwt_load_yaml_config() {
         [[ "$section" == "projects" ]] || continue
         [[ -n "$current_git_root" ]] || continue
         current_worktree_dir=$(_cwt_yaml_unquote "${line#"    worktree_dir: "}")
-        _cwt_project_worktree_dirs[$current_git_root]="$current_worktree_dir"
+        _cwt_config_project_worktree_dirs[$current_git_root]="$current_worktree_dir"
         current_git_root=""
         ;;
       "  "*": "*)
@@ -219,31 +249,31 @@ _cwt_load_legacy_global_config() {
         value="${(Q)${line#*=}}"
         case "$key" in
           CWT_WORKTREE_DIR)
-            _cwt_legacy_global_worktree_dir="$value"
+            _cwt_config_legacy_worktree_dir="$value"
             ;;
           CWT_DEFAULT_BASE_BRANCH)
-            _cwt_config_default_base_branch="$value"
+            _cwt_set_config_default "default_base_branch" "$value"
             ;;
           CWT_DEFAULT_ASSISTANT)
-            _cwt_config_default_assistant="$value"
+            _cwt_set_config_default "default_assistant" "$value"
             ;;
           CWT_AUTO_LAUNCH)
-            _cwt_config_auto_launch="$value"
+            _cwt_set_config_default "auto_launch" "$value"
             ;;
           CWT_LAUNCH_TARGET)
-            _cwt_config_launch_target="$value"
+            _cwt_set_config_default "launch_target" "$value"
             ;;
           CWT_PERMISSION_MODE)
-            _cwt_config_permission_mode="$value"
+            _cwt_set_config_default "permission_mode" "$value"
             ;;
           CWT_CMD_CLAUDE)
-            _cwt_config_cmd_claude="$value"
+            _cwt_set_config_default "cmd_claude" "$value"
             ;;
           CWT_CMD_CODEX)
-            _cwt_config_cmd_codex="$value"
+            _cwt_set_config_default "cmd_codex" "$value"
             ;;
           CWT_CMD_GEMINI)
-            _cwt_config_cmd_gemini="$value"
+            _cwt_set_config_default "cmd_gemini" "$value"
             ;;
         esac
         ;;
@@ -256,11 +286,7 @@ _cwt_load_project_config() {
 
   _cwt_load_yaml_config
   _cwt_load_legacy_global_config
-
-  if [[ -n "${_cwt_project_worktree_dirs[$_cwt_git_root]-}" ]]; then
-    _cwt_project_worktree_dir="${_cwt_project_worktree_dirs[$_cwt_git_root]}"
-    _cwt_current_project_has_config=1
-  fi
+  _cwt_bind_current_project_config
 }
 
 _cwt_is_interactive() {
@@ -390,7 +416,7 @@ _cwt_resolve_worktree_dir_value() {
 }
 
 _cwt_resolve_worktrees_dir() {
-  _cwt_resolve_worktree_dir_value "${CWT_WORKTREE_DIR:-${_cwt_project_worktree_dir:-}}"
+  _cwt_resolve_worktree_dir_value "${CWT_WORKTREE_DIR:-${_cwt_config_current_project_worktree_dir:-}}"
 }
 
 _cwt_worktrees_config_value() {
@@ -443,32 +469,6 @@ _cwt_print_detected_worktree_roots() {
   done
 }
 
-_cwt_select_line_with_fzf() {
-  local prompt="$1"
-  local header="$2"
-  shift 2
-  local selected
-  local fzf_status
-
-  _cwt_can_use_fzf || return 1
-
-  selected=$(printf '%s\n' "$@" | fzf \
-    --prompt="$prompt" \
-    --border \
-    --header="$header" 2>/dev/null)
-  fzf_status=$?
-
-  if [[ $fzf_status -eq 130 ]]; then
-    return 130
-  fi
-
-  if [[ $fzf_status -ne 0 ]]; then
-    return 1
-  fi
-
-  print -r -- "$selected"
-}
-
 _cwt_select_record_with_fzf() {
   local prompt="$1"
   local header="$2"
@@ -495,6 +495,119 @@ _cwt_select_record_with_fzf() {
   fi
 
   print -r -- "$selected"
+}
+
+_cwt_record_kind() {
+  print -r -- "${1%%$'\t'*}"
+}
+
+_cwt_record_value() {
+  local rest="${1#*$'\t'}"
+  print -r -- "${rest%%$'\t'*}"
+}
+
+_cwt_record_label() {
+  local rest="${1#*$'\t'}"
+  print -r -- "${rest#*$'\t'}"
+}
+
+_cwt_select_index_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local index
+  local -a labels=("$@")
+  local -a records=()
+  local selected_record
+
+  for (( index = 1; index <= ${#labels[@]}; index++ )); do
+    records+=("${index}"$'\t'"${labels[$index]}"$'\t'"${labels[$index]}")
+  done
+
+  selected_record=$(_cwt_select_record_with_fzf "$prompt" "$header" "${records[@]}") || return $?
+  print -r -- "${selected_record%%$'\t'*}"
+}
+
+_cwt_prompt_numbered_index() {
+  local list_title="$1"
+  local prompt="$2"
+  local default_choice="$3"
+  shift 3
+  local -a labels=("$@")
+  local index
+  local choice
+
+  echo "" >&2
+  [[ -n "$list_title" ]] && _cwt_log_info "$list_title"
+
+  for (( index = 1; index <= ${#labels[@]}; index++ )); do
+    echo "   $(_cwt_dim "$index)") ${labels[$index]}" >&2
+  done
+
+  choice=$(_cwt_prompt_choice "$prompt" "$default_choice")
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#labels[@]} )); then
+    print -r -- "$choice"
+    return 0
+  fi
+
+  _cwt_log_error "Invalid selection."
+  return 1
+}
+
+_cwt_select_index_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  local numbered_prompt="$3"
+  local default_choice="$4"
+  shift 4
+  local -a labels=("$@")
+  local selected_index=""
+  local select_status=1
+
+  if _cwt_can_use_fzf; then
+    selected_index=$(_cwt_select_index_with_fzf "$fzf_prompt" "ESC: cancel  Enter: select" "${labels[@]}")
+    select_status=$?
+    case "$select_status" in
+      0)
+        ;;
+      130)
+        return 130
+        ;;
+      *)
+        _cwt_log_warn "fzf failed. Falling back to numbered selection."
+        selected_index=""
+        ;;
+    esac
+  fi
+
+  if [[ -z "$selected_index" ]]; then
+    selected_index=$(_cwt_prompt_numbered_index "$list_title" "$numbered_prompt" "$default_choice" "${labels[@]}") || return 1
+  fi
+
+  print -r -- "$selected_index"
+}
+
+_cwt_select_record_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  local numbered_prompt="$3"
+  local default_choice="$4"
+  shift 4
+  local -a records=("$@")
+  local -a labels=()
+  local record
+  local selected_index
+  local select_status
+
+  for record in "${records[@]}"; do
+    labels+=("$(_cwt_record_label "$record")")
+  done
+
+  selected_index=$(_cwt_select_index_interactive "$fzf_prompt" "$list_title" "$numbered_prompt" "$default_choice" "${labels[@]}")
+  select_status=$?
+  [[ $select_status -eq 0 ]] || return $select_status
+
+  print -r -- "${records[$selected_index]}"
 }
 
 _cwt_read_browse_key() {
@@ -550,36 +663,70 @@ _cwt_read_browse_key() {
   esac
 }
 
+_cwt_worktree_root_action_records() {
+  local browse_dir="${1:A}"
+  local repo_name="${2:-${_cwt_git_root:t}}"
+  local suggested_dir="${browse_dir}/${repo_name}-worktrees"
+  local chosen_dir
+
+  reply=(
+    "suggested"$'\t'"${suggested_dir:A}"$'\t'"Create or use ${suggested_dir:A}"
+    "current"$'\t'"${browse_dir}"$'\t'"Use ${browse_dir} as the worktree root"
+  )
+
+  if [[ "$browse_dir" != "/" ]]; then
+    reply+=("up"$'\t'"${browse_dir:h:A}"$'\t'"Go up to ${browse_dir:h:A}")
+  fi
+
+  for chosen_dir in "$browse_dir"/*(/N); do
+    reply+=("child"$'\t'"${chosen_dir:A}"$'\t'"Browse ${chosen_dir:t}/")
+  done
+}
+
+_cwt_follow_worktree_root_action() {
+  local selected_record="$1"
+  local action_kind
+  local action_value
+  local chosen_dir
+
+  action_kind=$(_cwt_record_kind "$selected_record")
+  action_value=$(_cwt_record_value "$selected_record")
+
+  case "$action_kind" in
+    up|child)
+      reply=("browse" "$action_value")
+      return 0
+      ;;
+    suggested|current)
+      chosen_dir="${action_value:A}"
+      if [[ "$action_kind" == "current" && "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
+        _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || return 2
+      fi
+      _cwt_validate_worktrees_dir "$chosen_dir" || return 2
+      mkdir -p "$chosen_dir" 2>/dev/null || {
+        _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+        return 2
+      }
+      reply=("select" "$chosen_dir")
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 _cwt_browse_for_worktree_root_with_fzf() {
   local browse_dir="${_cwt_git_root:h}"
   local repo_name="${_cwt_git_root:t}"
-  local suggested_dir
-  local chosen_dir
-  local record
-  local action_kind
-  local action_value
-  local rest
   local selected
   local select_status
-  local -a child_dirs=()
   local -a action_records=()
+  local follow_status
 
   while true; do
-    suggested_dir="${browse_dir}/${repo_name}-worktrees"
-    child_dirs=("$browse_dir"/*(/N))
-
-    action_records=(
-      "suggested"$'\t'"$suggested_dir"$'\t'"Create or use ${suggested_dir}"
-      "current"$'\t'"$browse_dir"$'\t'"Use ${browse_dir} as the worktree root"
-    )
-
-    if [[ "$browse_dir" != "/" ]]; then
-      action_records+=("up"$'\t'"${browse_dir:h}"$'\t'"Go up to ${browse_dir:h}")
-    fi
-
-    for chosen_dir in "${child_dirs[@]}"; do
-      action_records+=("child"$'\t'"$chosen_dir"$'\t'"Browse ${chosen_dir:t}/")
-    done
+    _cwt_worktree_root_action_records "$browse_dir" "$repo_name"
+    action_records=("${reply[@]}")
 
     selected=$(_cwt_select_record_with_fzf \
       "Worktree folder > " \
@@ -598,26 +745,22 @@ _cwt_browse_for_worktree_root_with_fzf() {
         ;;
     esac
 
-    action_kind="${selected%%$'\t'*}"
-    rest="${selected#*$'\t'}"
-    action_value="${rest%%$'\t'*}"
-
-    case "$action_kind" in
-      up|child)
-        browse_dir="$action_value"
-        ;;
-      suggested|current)
-        chosen_dir="${action_value:A}"
-        if [[ "$action_kind" == "current" && "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
-          _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
-        fi
-        _cwt_validate_worktrees_dir "$chosen_dir" || continue
-        mkdir -p "$chosen_dir" 2>/dev/null || {
-          _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+    _cwt_follow_worktree_root_action "$selected"
+    follow_status=$?
+    case "$follow_status" in
+      0)
+        if [[ "${reply[1]}" == "browse" ]]; then
+          browse_dir="${reply[2]}"
           continue
-        }
-        print -r -- "$chosen_dir"
+        fi
+        print -r -- "${reply[2]}"
         return 0
+        ;;
+      2)
+        continue
+        ;;
+      *)
+        return 2
         ;;
     esac
   done
@@ -628,15 +771,13 @@ _cwt_browse_for_worktree_root() {
   local browse_status
   local browse_dir="${_cwt_git_root:h}"
   local repo_name="${_cwt_git_root:t}"
-  local suggested_dir
-  local chosen_dir
   local key
   local index
   local selected_index=1
-  local -a child_dirs=()
-  local -a action_kinds=()
-  local -a action_values=()
-  local -a action_labels=()
+  local record
+  local follow_status
+  local -a action_records=()
+  local -a visible_action_records=()
 
   if _cwt_can_use_fzf; then
     selected_root=$(_cwt_browse_for_worktree_root_with_fzf)
@@ -657,21 +798,17 @@ _cwt_browse_for_worktree_root() {
   fi
 
   while true; do
-    suggested_dir="${browse_dir}/${repo_name}-worktrees"
-    child_dirs=("$browse_dir"/*(/N))
+    _cwt_worktree_root_action_records "$browse_dir" "$repo_name"
+    action_records=("${reply[@]}")
+    visible_action_records=()
 
-    action_kinds=("suggested" "current")
-    action_values=("$suggested_dir" "$browse_dir")
-    action_labels=("Create or use ${suggested_dir}" "Use ${browse_dir} as the worktree root")
-
-    for chosen_dir in "${child_dirs[@]}"; do
-      action_kinds+=("child")
-      action_values+=("$chosen_dir")
-      action_labels+=("${chosen_dir:t}/")
+    for record in "${action_records[@]}"; do
+      [[ "$(_cwt_record_kind "$record")" == "up" ]] && continue
+      visible_action_records+=("$record")
     done
 
     (( selected_index < 1 )) && selected_index=1
-    (( selected_index > ${#action_kinds[@]} )) && selected_index=${#action_kinds[@]}
+    (( selected_index > ${#visible_action_records[@]} )) && selected_index=${#visible_action_records[@]}
 
     if [[ -t 2 ]]; then
       printf '\033[2J\033[H' >&2
@@ -683,11 +820,12 @@ _cwt_browse_for_worktree_root() {
     _cwt_log_item "← up  → enter folder  ↑/↓ move  Enter select  q cancel"
     echo "" >&2
 
-    for (( index = 1; index <= ${#action_kinds[@]}; index++ )); do
+    for (( index = 1; index <= ${#visible_action_records[@]}; index++ )); do
+      record="${visible_action_records[$index]}"
       if (( index == selected_index )); then
-        echo "   $(_cwt_cyan '>') ${action_labels[$index]}" >&2
+        echo "   $(_cwt_cyan '>') $(_cwt_record_label "$record")" >&2
       else
-        echo "     ${action_labels[$index]}" >&2
+        echo "     $(_cwt_record_label "$record")" >&2
       fi
     done
 
@@ -697,7 +835,7 @@ _cwt_browse_for_worktree_root() {
         (( selected_index > 1 )) && ((selected_index--))
         ;;
       down)
-        (( selected_index < ${#action_kinds[@]} )) && ((selected_index++))
+        (( selected_index < ${#visible_action_records[@]} )) && ((selected_index++))
         ;;
       left)
         if [[ "$browse_dir" != "/" ]]; then
@@ -706,29 +844,28 @@ _cwt_browse_for_worktree_root() {
         fi
         ;;
       right)
-        if [[ "${action_kinds[$selected_index]}" == "child" ]]; then
-          browse_dir="${action_values[$selected_index]}"
+        record="${visible_action_records[$selected_index]}"
+        if [[ "$(_cwt_record_kind "$record")" == "child" ]]; then
+          browse_dir="$(_cwt_record_value "$record")"
           selected_index=1
         fi
         ;;
       enter)
-        case "${action_kinds[$selected_index]}" in
-          child)
-            browse_dir="${action_values[$selected_index]}"
-            selected_index=1
-            ;;
-          suggested|current)
-            chosen_dir="${action_values[$selected_index]:A}"
-            if [[ "${action_kinds[$selected_index]}" == "current" && "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
-              _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
-            fi
-            _cwt_validate_worktrees_dir "$chosen_dir" || continue
-            mkdir -p "$chosen_dir" 2>/dev/null || {
-              _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+        record="${visible_action_records[$selected_index]}"
+        _cwt_follow_worktree_root_action "$record"
+        follow_status=$?
+        case "$follow_status" in
+          0)
+            if [[ "${reply[1]}" == "browse" ]]; then
+              browse_dir="${reply[2]}"
+              selected_index=1
               continue
-            }
-            print -r -- "$chosen_dir"
+            fi
+            print -r -- "${reply[2]}"
             return 0
+            ;;
+          2)
+            continue
             ;;
         esac
         ;;
@@ -744,66 +881,34 @@ _cwt_write_setup_config() {
   local config_value="$2"
   local git_root
   local -a git_roots=()
-  local -a default_keys=()
-  local -a default_values=()
-  local index
+  local key
+  local value
 
   mkdir -p "${config_file:h}" 2>/dev/null || {
     _cwt_log_warn "Could not create $(_cwt_bold "${config_file:h}")."
     return 1
   }
 
-  _cwt_project_worktree_dirs[$_cwt_git_root]="$config_value"
-  git_roots=("${(@Qok)_cwt_project_worktree_dirs}")
-
-  [[ -n "$_cwt_config_default_base_branch" ]] && {
-    default_keys+=("default_base_branch")
-    default_values+=("$_cwt_config_default_base_branch")
-  }
-  [[ -n "$_cwt_config_default_assistant" ]] && {
-    default_keys+=("default_assistant")
-    default_values+=("$_cwt_config_default_assistant")
-  }
-  [[ -n "$_cwt_config_auto_launch" ]] && {
-    default_keys+=("auto_launch")
-    default_values+=("$_cwt_config_auto_launch")
-  }
-  [[ -n "$_cwt_config_launch_target" ]] && {
-    default_keys+=("launch_target")
-    default_values+=("$_cwt_config_launch_target")
-  }
-  [[ -n "$_cwt_config_permission_mode" ]] && {
-    default_keys+=("permission_mode")
-    default_values+=("$_cwt_config_permission_mode")
-  }
-  [[ -n "$_cwt_config_cmd_claude" ]] && {
-    default_keys+=("cmd_claude")
-    default_values+=("$_cwt_config_cmd_claude")
-  }
-  [[ -n "$_cwt_config_cmd_codex" ]] && {
-    default_keys+=("cmd_codex")
-    default_values+=("$_cwt_config_cmd_codex")
-  }
-  [[ -n "$_cwt_config_cmd_gemini" ]] && {
-    default_keys+=("cmd_gemini")
-    default_values+=("$_cwt_config_cmd_gemini")
-  }
+  _cwt_config_project_worktree_dirs[$_cwt_git_root]="$config_value"
+  git_roots=("${(@Qok)_cwt_config_project_worktree_dirs}")
 
   {
     print -r -- "# cwt config"
     print -r -- "# Project-scoped worktree roots and defaults. Created by cwt."
     print -r -- ""
     print -r -- "version: 1"
-    if (( ${#default_keys[@]} > 0 )); then
+    if _cwt_has_config_defaults; then
       print -r -- "defaults:"
-      for (( index = 1; index <= ${#default_keys[@]}; index++ )); do
-        print -r -- "  ${default_keys[$index]}: $(_cwt_yaml_quote "${default_values[$index]}")"
+      for key in "${_cwt_config_known_default_keys[@]}"; do
+        value=$(_cwt_get_config_default "$key")
+        [[ -n "$value" ]] || continue
+        print -r -- "  ${key}: $(_cwt_yaml_quote "$value")"
       done
     fi
     print -r -- "projects:"
     for git_root in "${git_roots[@]}"; do
       print -r -- "  - git_root: $(_cwt_yaml_quote "$git_root")"
-      print -r -- "    worktree_dir: $(_cwt_yaml_quote "${_cwt_project_worktree_dirs[$git_root]}")"
+      print -r -- "    worktree_dir: $(_cwt_yaml_quote "${_cwt_config_project_worktree_dirs[$git_root]}")"
     done
   } >| "$config_file" 2>/dev/null || {
     _cwt_log_warn "Could not write $(_cwt_bold "$config_file")."
@@ -815,8 +920,8 @@ _cwt_apply_setup_choice() {
   local config_value="$1"
   local config_file="$2"
 
-  _cwt_project_worktree_dir="$config_value"
-  _cwt_current_project_has_config=1
+  _cwt_config_project_worktree_dirs[$_cwt_git_root]="$config_value"
+  _cwt_bind_current_project_config
 
   _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
   _cwt_validate_worktrees_dir "$_cwt_worktrees_dir" || return 1
@@ -834,9 +939,30 @@ _cwt_should_run_setup_wizard() {
   [[ -n "${CWT_SKIP_SETUP_WIZARD:-}" ]] && return 1
   [[ "${CWT_FORCE_SETUP_WIZARD:-0}" == "1" ]] && return 0
   [[ -n "${CWT_WORKTREE_DIR:-}" ]] && return 1
-  [[ "${_cwt_current_project_has_config:-0}" == "1" ]] && return 1
+  _cwt_has_project_config && return 1
 
   _cwt_is_interactive
+}
+
+_cwt_setup_option_records() {
+  local detected_label
+  local detected_path
+
+  reply=()
+
+  if [[ -n "$_cwt_config_legacy_worktree_dir" ]]; then
+    reply+=(
+      "legacy"$'\t'"$_cwt_config_legacy_worktree_dir"$'\t'"Use the legacy cwt setting for this project: ${_cwt_config_legacy_worktree_dir}"
+    )
+  fi
+
+  while IFS='|' read -r detected_label detected_path; do
+    [[ -z "$detected_label" || -z "$detected_path" ]] && continue
+    reply+=("detected"$'\t'"${detected_path:A}"$'\t'"${detected_label}: ${detected_path:A}")
+  done < <(_cwt_print_detected_worktree_roots)
+
+  reply+=("browse"$'\t\t'"Browse for another worktree folder")
+  reply+=("skip"$'\t\t'"Not now. Use the default for this run only")
 }
 
 _cwt_maybe_run_setup_wizard() {
@@ -845,15 +971,11 @@ _cwt_maybe_run_setup_wizard() {
   local config_value="$(_cwt_default_worktrees_config_value)"
   local custom_root
   local browse_status
-  local choice
-  local index
   local selected_record
   local selected_status
-  local -a option_kinds=()
-  local -a option_labels=()
-  local -a option_values=()
+  local option_kind
+  local option_value
   local -a option_records=()
-  local detected_line detected_label detected_path
 
   _cwt_should_run_setup_wizard || return 0
 
@@ -870,80 +992,38 @@ _cwt_maybe_run_setup_wizard() {
     return 0
   fi
 
-  if [[ -n "$_cwt_legacy_global_worktree_dir" ]]; then
-    option_kinds+=("legacy")
-    option_values+=("$_cwt_legacy_global_worktree_dir")
-    option_labels+=("Use the legacy cwt setting for this project: ${_cwt_legacy_global_worktree_dir}")
-  fi
-
-  while IFS='|' read -r detected_label detected_path; do
-    [[ -z "$detected_label" || -z "$detected_path" ]] && continue
-    option_kinds+=("detected")
-    option_values+=("$detected_path")
-    option_labels+=("${detected_label}: ${detected_path}")
-  done < <(_cwt_print_detected_worktree_roots)
-
-  option_kinds+=("browse")
-  option_values+=("")
-  option_labels+=("Browse for another worktree folder")
-
-  option_kinds+=("skip")
-  option_values+=("")
-  option_labels+=("Not now. Use the default for this run only")
+  _cwt_setup_option_records
+  option_records=("${reply[@]}")
 
   while true; do
-    choice=""
+    selected_record=""
     echo "" >&2
     _cwt_log_info "Okay. Choose another location."
 
-    if _cwt_can_use_fzf; then
-      option_records=()
-      for (( index = 1; index <= ${#option_kinds[@]}; index++ )); do
-        option_records+=("${index}"$'\t'"${option_kinds[$index]}"$'\t'"${option_labels[$index]}")
-      done
-
-      selected_record=$(_cwt_select_record_with_fzf \
-        "Setup option > " \
-        "Enter: choose  ESC: cancel" \
-        "${option_records[@]}")
-      selected_status=$?
-
-      case "$selected_status" in
-        0)
-          choice="${selected_record%%$'\t'*}"
-          ;;
-        130)
-          _cwt_log_warn "Cancelled."
-          return 0
-          ;;
-        *)
-          _cwt_log_warn "fzf failed. Falling back to numbered selection."
-          choice=""
-          ;;
-      esac
-    fi
-
-    if [[ -z "$choice" ]]; then
-      index=1
-      for choice in "${option_labels[@]}"; do
-        echo "   $(_cwt_dim "$index)") $choice" >&2
-        ((index++))
-      done
-
-      choice=$(_cwt_prompt_choice "Choose another option [1]: " "1")
-      if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#option_kinds[@]} )); then
-        _cwt_log_error "Invalid selection."
+    selected_record=$(_cwt_select_record_interactive "Setup option > " "" "Choose another option [1]: " "1" "${option_records[@]}")
+    selected_status=$?
+    case "$selected_status" in
+      0)
+        ;;
+      130)
+        _cwt_log_warn "Cancelled."
+        return 0
+        ;;
+      *)
         continue
-      fi
-    fi
+        ;;
+    esac
 
-    case "${option_kinds[$choice]}" in
+    option_kind=$(_cwt_record_kind "$selected_record")
+    option_value=$(_cwt_record_value "$selected_record")
+
+    case "$option_kind" in
       legacy)
-        _cwt_apply_setup_choice "${option_values[$choice]}" "$config_file" || return 1
+        _cwt_apply_setup_choice "$option_value" "$config_file" || return 1
         return 0
         ;;
       detected)
-        config_value=$(_cwt_worktrees_config_value "${option_values[$choice]}")
+        config_value=$(_cwt_worktrees_config_value "$option_value")
         _cwt_apply_setup_choice "$config_value" "$config_file" || return 1
         return 0
         ;;
@@ -999,12 +1079,15 @@ typeset -ga _cwt_worktree_names_cache=()
 typeset -ga _cwt_worktree_paths_cache=()
 
 _cwt_collect_managed_worktrees() {
+  local git_root="${1:-$_cwt_git_root}"
+  local worktrees_dir="${2:-$_cwt_worktrees_dir}"
+
   _cwt_worktree_names_cache=()
   _cwt_worktree_paths_cache=()
 
-  [[ -d "$_cwt_worktrees_dir" ]] || return 0
+  [[ -d "$worktrees_dir" ]] || return 0
 
-  local managed_root="${_cwt_worktrees_dir:A}"
+  local managed_root="${worktrees_dir:A}"
   local line wt_path name
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" == worktree\ * ]] || continue
@@ -1018,7 +1101,7 @@ _cwt_collect_managed_worktrees() {
 
     _cwt_worktree_names_cache+=("$name")
     _cwt_worktree_paths_cache+=("$wt_path")
-  done < <(git -C "$_cwt_git_root" worktree list --porcelain 2>/dev/null)
+  done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null)
 }
 
 _cwt_worktree_path_from_name() {
@@ -1049,47 +1132,19 @@ _cwt_select_worktree_interactive() {
   local list_title="$2"
   shift 2
   local -a names=("$@")
+  local selected_index
+  local select_status
 
-  local selected=""
-  local fzf_status=1
-  local i
-  local num
-  local name
+  selected_index=$(_cwt_select_index_interactive "$fzf_prompt" "$list_title" "Choice: " "" "${names[@]}")
+  select_status=$?
+  [[ $select_status -eq 130 ]] && return 1
+  [[ $select_status -eq 0 ]] || return 1
 
-  if _cwt_can_use_fzf; then
-    selected=$(_cwt_select_line_with_fzf "$fzf_prompt" "ESC: cancel  Enter: select" "${names[@]}")
-    fzf_status=$?
-    if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
-      selected=""
-      _cwt_log_warn "fzf failed. Falling back to numbered selection."
-    fi
-  fi
-
-  [[ $fzf_status -eq 130 ]] && return 1
-
-  if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
-    echo "" >&2
-    _cwt_log_info "$list_title"
-    i=1
-    for name in "${names[@]}"; do
-      echo "   $(_cwt_dim "$i)") $name" >&2
-      ((i++))
-    done
-    echo -n "$(_cwt_cyan '?') Choice: " >&2
-    read num
-    if [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#names[@]} )); then
-      selected="${names[$num]}"
-    else
-      _cwt_log_error "Invalid selection."
-      return 1
-    fi
-  fi
-
-  echo "$selected"
+  echo "${names[$selected_index]}"
 }
 
 _cwt_default_assistant() {
-  echo "${${CWT_DEFAULT_ASSISTANT:-${_cwt_config_default_assistant:-claude}}:l}"
+  _cwt_get_effective_config_value "CWT_DEFAULT_ASSISTANT" "default_assistant" "claude" "1"
 }
 
 _cwt_is_valid_assistant() {
@@ -1116,7 +1171,7 @@ _cwt_assistant_default_candidates() {
 }
 
 _cwt_default_launch_target() {
-  echo "${${CWT_LAUNCH_TARGET:-${_cwt_config_launch_target:-current}}:l}"
+  _cwt_get_effective_config_value "CWT_LAUNCH_TARGET" "launch_target" "current" "1"
 }
 
 _cwt_is_valid_launch_target() {
@@ -1127,39 +1182,34 @@ _cwt_is_valid_launch_target() {
 }
 
 _cwt_default_permission_mode() {
-  echo "${${CWT_PERMISSION_MODE:-${_cwt_config_permission_mode:-default}}:l}"
+  _cwt_get_effective_config_value "CWT_PERMISSION_MODE" "permission_mode" "default" "1"
 }
 
 _cwt_default_base_branch() {
-  print -r -- "${CWT_DEFAULT_BASE_BRANCH:-${_cwt_config_default_base_branch:-}}"
+  _cwt_get_effective_config_value "CWT_DEFAULT_BASE_BRANCH" "default_base_branch" ""
 }
 
 _cwt_auto_launch_enabled() {
-  local auto_launch="${${CWT_AUTO_LAUNCH:-${_cwt_config_auto_launch:-true}}:l}"
+  local auto_launch
+  auto_launch=$(_cwt_get_effective_config_value "CWT_AUTO_LAUNCH" "auto_launch" "true" "1")
   [[ "$auto_launch" != "false" ]]
+}
+
+_cwt_assistant_config_key() {
+  case "${1:l}" in
+    claude) print -r -- "cmd_claude" ;;
+    codex) print -r -- "cmd_codex" ;;
+    gemini) print -r -- "cmd_gemini" ;;
+  esac
 }
 
 _cwt_configured_assistant_cmd() {
   local assistant="${1:l}"
   local env_var="$(_cwt_assistant_env_var_name "$assistant")"
-  local env_value="${(P)env_var}"
-
-  [[ -n "$env_value" ]] && {
-    print -r -- "$env_value"
-    return 0
-  }
-
-  case "$assistant" in
-    claude)
-      print -r -- "$_cwt_config_cmd_claude"
-      ;;
-    codex)
-      print -r -- "$_cwt_config_cmd_codex"
-      ;;
-    gemini)
-      print -r -- "$_cwt_config_cmd_gemini"
-      ;;
-  esac
+  local config_key
+  config_key=$(_cwt_assistant_config_key "$assistant")
+  [[ -n "$config_key" ]] || return 0
+  _cwt_get_effective_config_value "$env_var" "$config_key"
 }
 
 _cwt_is_valid_permission_mode() {
@@ -1182,22 +1232,16 @@ _cwt_permission_flag_for_assistant() {
   esac
 }
 
-_cwt_reset_launch_parse_state() {
-  _cwt_launch_parse_assistant=$(_cwt_default_assistant)
-  _cwt_launch_parse_target=$(_cwt_default_launch_target)
-  _cwt_launch_parse_permission=$(_cwt_default_permission_mode)
-  _cwt_launch_parse_target_explicit=0
-  _cwt_launch_parse_consumed=0
-  _cwt_launch_parse_requested=0
-}
-
 _cwt_parse_shared_launch_option() {
   local arg="$1"
   local next_value="$2"
+  local assistant="$3"
+  local launch_target="$4"
+  local permission_mode="$5"
+  local launch_target_explicit="${6:-0}"
   local inline_value
-
-  _cwt_launch_parse_consumed=0
-  _cwt_launch_parse_requested=0
+  local consumed=0
+  local requested=0
 
   case "$arg" in
     --assistant)
@@ -1206,20 +1250,20 @@ _cwt_parse_shared_launch_option() {
         echo "  Use one of: claude, codex, gemini" >&2
         return 1
       fi
-      _cwt_launch_parse_assistant="${next_value:l}"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=2
+      assistant="${next_value:l}"
+      requested=1
+      consumed=2
       ;;
     --assistant=*)
       inline_value="${arg#--assistant=}"
-      _cwt_launch_parse_assistant="${inline_value:l}"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      assistant="${inline_value:l}"
+      requested=1
+      consumed=1
       ;;
     --claude|--codex|--gemini)
-      _cwt_launch_parse_assistant="${arg#--}"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      assistant="${arg#--}"
+      requested=1
+      consumed=1
       ;;
     --launch-target)
       if [[ -z "$next_value" ]]; then
@@ -1227,50 +1271,51 @@ _cwt_parse_shared_launch_option() {
         echo "  Use one of: current, split, tab" >&2
         return 1
       fi
-      _cwt_launch_parse_target="${next_value:l}"
-      _cwt_launch_parse_target_explicit=1
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=2
+      launch_target="${next_value:l}"
+      launch_target_explicit=1
+      requested=1
+      consumed=2
       ;;
     --launch-target=*)
       inline_value="${arg#--launch-target=}"
-      _cwt_launch_parse_target="${inline_value:l}"
-      _cwt_launch_parse_target_explicit=1
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      launch_target="${inline_value:l}"
+      launch_target_explicit=1
+      requested=1
+      consumed=1
       ;;
     --current|--split|--tab)
-      _cwt_launch_parse_target="${arg#--}"
-      _cwt_launch_parse_target_explicit=1
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      launch_target="${arg#--}"
+      launch_target_explicit=1
+      requested=1
+      consumed=1
       ;;
     --all-permissions)
-      _cwt_launch_parse_permission="full"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      permission_mode="full"
+      requested=1
+      consumed=1
       ;;
     --default-permissions)
-      _cwt_launch_parse_permission="default"
-      _cwt_launch_parse_consumed=1
+      permission_mode="default"
+      consumed=1
       ;;
     --yolo)
-      _cwt_launch_parse_assistant="codex"
-      _cwt_launch_parse_permission="full"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      assistant="codex"
+      permission_mode="full"
+      requested=1
+      consumed=1
       ;;
     --dangerously-skip-permissions)
-      _cwt_launch_parse_assistant="claude"
-      _cwt_launch_parse_permission="full"
-      _cwt_launch_parse_requested=1
-      _cwt_launch_parse_consumed=1
+      assistant="claude"
+      permission_mode="full"
+      requested=1
+      consumed=1
       ;;
     *)
       return 2
       ;;
   esac
 
+  reply=("$assistant" "$launch_target" "$permission_mode" "$launch_target_explicit" "$consumed" "$requested")
   return 0
 }
 
@@ -1462,9 +1507,11 @@ _cwt_launch_assistant() {
 }
 
 _cwt_ensure_default_worktree_ignored() {
-  [[ "$_cwt_worktrees_dir" != "${_cwt_git_root}/.worktrees" ]] && return 0
+  local git_root="${1:-$_cwt_git_root}"
+  local worktrees_dir="${2:-$_cwt_worktrees_dir}"
+  [[ "$worktrees_dir" != "${git_root}/.worktrees" ]] && return 0
 
-  local gitignore_path="${_cwt_git_root}/.gitignore"
+  local gitignore_path="${git_root}/.gitignore"
   local ignore_entry=".worktrees/"
 
   if [[ -f "$gitignore_path" ]] && grep -Eq '^[[:space:]]*\.worktrees/?[[:space:]]*$' "$gitignore_path"; then
@@ -1506,8 +1553,10 @@ _cwt_new() {
   local no_launch=0
   _cwt_auto_launch_enabled || no_launch=1
   local positional=()
-
-  _cwt_reset_launch_parse_state
+  local assistant="$(_cwt_default_assistant)"
+  local launch_target="$(_cwt_default_launch_target)"
+  local permission_mode="$(_cwt_default_permission_mode)"
+  local launch_target_explicit=0
 
   while [[ $# -gt 0 ]]; do
     local arg="$1"
@@ -1561,11 +1610,17 @@ EOF
         shift
         ;;
       -*)
-        _cwt_parse_shared_launch_option "$1" "${2:-}"
-        case $? in
+        local parse_status
+        _cwt_parse_shared_launch_option "$1" "${2:-}" "$assistant" "$launch_target" "$permission_mode" "$launch_target_explicit"
+        parse_status=$?
+        case $parse_status in
           0)
-            [[ "$_cwt_launch_parse_requested" == "1" ]] && no_launch=0
-            shift "$_cwt_launch_parse_consumed"
+            assistant="${reply[1]}"
+            launch_target="${reply[2]}"
+            permission_mode="${reply[3]}"
+            launch_target_explicit="${reply[4]}"
+            [[ "${reply[6]}" == "1" ]] && no_launch=0
+            shift "${reply[5]}"
             ;;
           1)
             return 1
@@ -1584,10 +1639,8 @@ EOF
     esac
   done
 
-  local assistant="$_cwt_launch_parse_assistant"
-  local launch_target="$_cwt_launch_parse_target"
-  local permission_mode="$_cwt_launch_parse_permission"
-  local launch_target_explicit="$_cwt_launch_parse_target_explicit"
+  local git_root="$_cwt_git_root"
+  local worktrees_dir="$_cwt_worktrees_dir"
 
   if ! _cwt_is_valid_assistant "$assistant"; then
     _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
@@ -1625,54 +1678,44 @@ EOF
     [[ -z "$name" ]] && { _cwt_log_error "Name is required."; return 1; }
   fi
 
-  local worktree_path="${_cwt_worktrees_dir}/${name}"
+  local worktree_path="${worktrees_dir}/${name}"
   if [[ -d "$worktree_path" ]]; then
     _cwt_log_error "Worktree already exists: $(_cwt_bold "$name")"
     return 1
   fi
 
-  _cwt_ensure_default_worktree_ignored || return 1
+  _cwt_ensure_default_worktree_ignored "$git_root" "$worktrees_dir" || return 1
 
   # 2) Base branch selection
   local base_branch="${positional[2]}"
   [[ -z "$base_branch" ]] && base_branch="$(_cwt_default_base_branch)"
   if [[ -z "$base_branch" ]]; then
-    local branches=("HEAD" $(git -C "$_cwt_git_root" branch --format='%(refname:short)' 2>/dev/null))
+    local branches=("HEAD" $(git -C "$git_root" branch --format='%(refname:short)' 2>/dev/null))
     if ! _cwt_is_interactive; then
       base_branch="HEAD"
     else
-      local fzf_status=1
-      if _cwt_can_use_fzf; then
-        base_branch=$(_cwt_select_line_with_fzf "Base branch > " "ESC: cancel  Enter: select" "${branches[@]}")
-        fzf_status=$?
-        if [[ $fzf_status -eq 130 ]]; then
+      local selected_index
+      local select_status
+      selected_index=$(_cwt_select_index_interactive \
+        "Base branch > " \
+        "Select base branch:" \
+        "Choice (default: 1=HEAD): " \
+        "1" \
+        "${branches[@]}")
+      select_status=$?
+
+      case "$select_status" in
+        0)
+          base_branch="${branches[$selected_index]}"
+          ;;
+        130)
           _cwt_log_warn "Cancelled."
           return 0
-        elif [[ $fzf_status -ne 0 ]]; then
-          base_branch=""
-          _cwt_log_warn "fzf failed. Falling back to numbered selection."
-        fi
-      fi
-
-      if [[ -z "$base_branch" ]]; then
-        echo "" >&2
-        _cwt_log_info "Select base branch:"
-        local i=1
-        for b in "${branches[@]}"; do
-          echo "   $(_cwt_dim "$i)") $b" >&2
-          ((i++))
-        done
-        echo -n "$(_cwt_cyan '?') Choice $(_cwt_dim '(default: 1=HEAD)'): " >&2
-        read num
-        if [[ -z "$num" ]]; then
-          base_branch="HEAD"
-        elif [[ "$num" =~ ^[0-9]+$ ]] && (( num >= 1 && num <= ${#branches[@]} )); then
-          base_branch="${branches[$num]}"
-        else
-          _cwt_log_error "Invalid selection."
+          ;;
+        *)
           return 1
-        fi
-      fi
+          ;;
+      esac
     fi
   fi
 
@@ -1684,7 +1727,7 @@ EOF
     while (( attempts < 5 )); do
       rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
       branch_name="wt/${name}-${rand}"
-      git -C "$_cwt_git_root" rev-parse --verify "refs/heads/$branch_name" &>/dev/null || break
+      git -C "$git_root" rev-parse --verify "refs/heads/$branch_name" &>/dev/null || break
       ((attempts++))
     done
     if (( attempts >= 5 )); then
@@ -1695,12 +1738,12 @@ EOF
 
   # 4) Create worktree
   echo "" >&2
-  if [[ "$_cwt_worktrees_dir" != "${_cwt_git_root}/.worktrees" ]]; then
-    _cwt_log_info "Using custom worktree root: $(_cwt_bold "$_cwt_worktrees_dir")"
+  if [[ "$worktrees_dir" != "${git_root}/.worktrees" ]]; then
+    _cwt_log_info "Using custom worktree root: $(_cwt_bold "$worktrees_dir")"
   fi
   _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."
 
-  git -C "$_cwt_git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1
+  git -C "$git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1
   if [[ $? -ne 0 ]]; then
     _cwt_log_error "Failed to create worktree."
     return 1
@@ -1709,7 +1752,7 @@ EOF
   _cwt_log_success "Worktree created."
 
   # 5) .worktreeinclude handling
-  local include_file="${_cwt_git_root}/.worktreeinclude"
+  local include_file="${git_root}/.worktreeinclude"
   if [[ -f "$include_file" ]]; then
     _cwt_log_info "Copying files from .worktreeinclude..."
     local pattern
@@ -1726,7 +1769,7 @@ EOF
       [[ -z "$trimmed_pattern" || "$trimmed_pattern" == \#* ]] && continue
 
       # (N) keeps unmatched globs from throwing "no matches found".
-      files=( "${_cwt_git_root}"/${~trimmed_pattern}(N) )
+      files=( "${git_root}"/${~trimmed_pattern}(N) )
       if (( ${#files[@]} == 0 )); then
         if [[ "$trimmed_pattern" == *[\*\?\[]* ]]; then
           _cwt_log_warn ".worktreeinclude pattern matched nothing: $trimmed_pattern"
@@ -1736,7 +1779,7 @@ EOF
 
       for src in "${files[@]}"; do
         [[ ! -e "$src" ]] && continue
-        rel="${src#${_cwt_git_root}/}"
+        rel="${src#${git_root}/}"
         dst="${worktree_path}/${rel}"
         if [[ -e "$dst" || -L "$dst" ]]; then
           _cwt_log_warn ".worktreeinclude skipped existing destination: $rel"
@@ -1778,6 +1821,9 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 
 _cwt_ls() {
+  local git_root="$_cwt_git_root"
+  local worktrees_dir="$_cwt_worktrees_dir"
+
   for arg in "$@"; do
     case "$arg" in
       --help|-h)
@@ -1804,14 +1850,14 @@ EOF
     esac
   done
 
-  if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+  if [[ ! -d "$worktrees_dir" ]]; then
     _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
   local count=0
   local entries=()
-  _cwt_collect_managed_worktrees
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
   local wt_name d i
 
   for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
@@ -1850,7 +1896,7 @@ EOF
 
   # Header decoration goes to stderr
   echo "" >&2
-  echo "  $(_cwt_bold "$(_cwt_cyan 'Worktrees')") $(_cwt_dim "($_cwt_git_root)")" >&2
+  echo "  $(_cwt_bold "$(_cwt_cyan 'Worktrees')") $(_cwt_dim "($git_root)")" >&2
   echo "  $(_cwt_dim '─────────────────────────────────────────────────────────────────')" >&2
   echo "" >&2
 
@@ -1881,6 +1927,9 @@ EOF
 _cwt_rm() {
   local force=0
   local positional=()
+  local git_root="$_cwt_git_root"
+  local current_root="$_cwt_current_root"
+  local worktrees_dir="$_cwt_worktrees_dir"
 
   for arg in "$@"; do
     case "$arg" in
@@ -1921,7 +1970,7 @@ EOF
 
   local selected="${positional[1]}"
 
-  if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+  if [[ ! -d "$worktrees_dir" ]]; then
     if [[ -n "$selected" ]]; then
       _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
       return 1
@@ -1931,7 +1980,7 @@ EOF
   fi
 
   # Collect worktree names
-  _cwt_collect_managed_worktrees
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
   local worktree_names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#worktree_names[@]} -eq 0 ]]; then
@@ -1990,21 +2039,21 @@ EOF
   fi
 
   # Remove worktree
-  if [[ "${_cwt_current_root:A}" == "${worktree_path:A}" ]]; then
-    cd "$_cwt_git_root" || {
+  if [[ "${current_root:A}" == "${worktree_path:A}" ]]; then
+    cd "$git_root" || {
       _cwt_log_error "Failed to move to main repository before removal."
       return 1
     }
-    _cwt_log_info "Moved to main repository: $(_cwt_dim "$_cwt_git_root")"
+    _cwt_log_info "Moved to main repository: $(_cwt_dim "$git_root")"
   fi
 
   _cwt_log_info "Removing worktree $(_cwt_bold "$selected")..."
 
   local rm_output
-  rm_output=$(git -C "$_cwt_git_root" worktree remove "$worktree_path" 2>&1)
+  rm_output=$(git -C "$git_root" worktree remove "$worktree_path" 2>&1)
   if [[ $? -ne 0 ]]; then
     if [[ $force -eq 1 ]]; then
-      git -C "$_cwt_git_root" worktree remove --force "$worktree_path" 2>&1
+      git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
       if [[ $? -ne 0 ]]; then
         _cwt_log_error "Failed to remove worktree."
         return 1
@@ -2014,7 +2063,7 @@ EOF
       echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
       read force_confirm
       if [[ "$force_confirm" == [yY] ]]; then
-        git -C "$_cwt_git_root" worktree remove --force "$worktree_path" 2>&1
+        git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
         if [[ $? -ne 0 ]]; then
           _cwt_log_error "Failed to force remove worktree."
           return 1
@@ -2029,18 +2078,18 @@ EOF
   # Safe branch cleanup: try -d first, ask before -D
   if [[ -n "$branch" ]]; then
     local branch_err
-    branch_err=$(git -C "$_cwt_git_root" branch -d "$branch" 2>&1)
+    branch_err=$(git -C "$git_root" branch -d "$branch" 2>&1)
     if [[ $? -eq 0 ]]; then
       _cwt_log_success "Branch $(_cwt_bold "$branch") deleted."
     elif [[ $force -eq 1 ]]; then
-      git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null && \
+      git -C "$git_root" branch -D "$branch" 2>/dev/null && \
         _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
     else
       _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
       echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
       read branch_confirm
       if [[ "$branch_confirm" == [yY] ]]; then
-        git -C "$_cwt_git_root" branch -D "$branch" 2>/dev/null && \
+        git -C "$git_root" branch -D "$branch" 2>/dev/null && \
           _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
       else
         _cwt_log_info "Branch $(_cwt_bold "$branch") kept."
@@ -2058,8 +2107,10 @@ EOF
 _cwt_cd() {
   local launch_assistant=0
   local positional=()
-
-  _cwt_reset_launch_parse_state
+  local assistant="$(_cwt_default_assistant)"
+  local launch_target="$(_cwt_default_launch_target)"
+  local permission_mode="$(_cwt_default_permission_mode)"
+  local launch_target_explicit=0
 
   while [[ $# -gt 0 ]]; do
     local arg="$1"
@@ -2103,11 +2154,17 @@ $(_cwt_bold 'EXAMPLES')
 EOF
         return 0 ;;
       -*)
-        _cwt_parse_shared_launch_option "$1" "${2:-}"
-        case $? in
+        local parse_status
+        _cwt_parse_shared_launch_option "$1" "${2:-}" "$assistant" "$launch_target" "$permission_mode" "$launch_target_explicit"
+        parse_status=$?
+        case $parse_status in
           0)
-            [[ "$_cwt_launch_parse_requested" == "1" ]] && launch_assistant=1
-            shift "$_cwt_launch_parse_consumed"
+            assistant="${reply[1]}"
+            launch_target="${reply[2]}"
+            permission_mode="${reply[3]}"
+            launch_target_explicit="${reply[4]}"
+            [[ "${reply[6]}" == "1" ]] && launch_assistant=1
+            shift "${reply[5]}"
             ;;
           1)
             return 1
@@ -2126,10 +2183,9 @@ EOF
     esac
   done
 
-  local assistant="$_cwt_launch_parse_assistant"
-  local launch_target="$_cwt_launch_parse_target"
-  local permission_mode="$_cwt_launch_parse_permission"
-  local launch_target_explicit="$_cwt_launch_parse_target_explicit"
+  local git_root="$_cwt_git_root"
+  local current_root="$_cwt_current_root"
+  local worktrees_dir="$_cwt_worktrees_dir"
 
   if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_assistant "$assistant"; then
     _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
@@ -2154,22 +2210,22 @@ EOF
   fi
 
   local selected="${positional[1]}"
-  local main_root="${_cwt_git_root:A}"
-  local current_root="${_cwt_current_root:A}"
+  local main_root="${git_root:A}"
+  current_root="${current_root:A}"
 
   # When run inside a worktree with no name, return to the main repository.
   if [[ -z "$selected" && "$current_root" != "$main_root" ]]; then
-    cd "$_cwt_git_root" || {
+    cd "$git_root" || {
       _cwt_log_error "Failed to enter main repository."
       return 1
     }
 
     _cwt_log_success "Entered main repository"
-    _cwt_log_item "$(_cwt_dim "$_cwt_git_root")"
+    _cwt_log_item "$(_cwt_dim "$git_root")"
 
-    if [[ -d "$_cwt_worktrees_dir" ]]; then
+    if [[ -d "$worktrees_dir" ]]; then
       local recommendations=()
-      _cwt_collect_managed_worktrees
+      _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
       local d n i
       for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
         n="${_cwt_worktree_names_cache[$i]}"
@@ -2191,13 +2247,13 @@ EOF
     return 0
   fi
 
-  if [[ ! -d "$_cwt_worktrees_dir" ]]; then
+  if [[ ! -d "$worktrees_dir" ]]; then
     _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
     return 0
   fi
 
   # Collect names
-  _cwt_collect_managed_worktrees
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
   local names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#names[@]} -eq 0 ]]; then

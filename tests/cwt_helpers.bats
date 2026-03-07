@@ -203,6 +203,216 @@ teardown() {
 	[[ "$output" == *"worktrees_dir=$expected_dir"* ]]
 }
 
+@test "_cwt_require_git: config model binds defaults and current project settings" {
+	create_test_repo
+	local repo_real
+	local expected_dir
+	repo_real="$(cd "$REPO_DIR" && pwd -P)"
+	expected_dir="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
+
+	mkdir -p "$XDG_CONFIG_HOME/cwt"
+	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+version: 1
+defaults:
+  default_assistant: 'codex'
+  launch_target: 'tab'
+projects:
+  - git_root: '/tmp/already-configured'
+    worktree_dir: '../other-worktrees'
+  - git_root: '$repo_real'
+    worktree_dir: '../repo-worktrees'
+EOF
+
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    cd '$REPO_DIR'
+    _cwt_require_git
+    echo \"project_dir=\$_cwt_config_current_project_worktree_dir\"
+    echo \"assistant=\$(_cwt_default_assistant)\"
+    echo \"launch_target=\$(_cwt_default_launch_target)\"
+    echo \"worktrees_dir=\$_cwt_worktrees_dir\"
+    _cwt_has_project_config
+    echo \"has_project=\$?\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"project_dir=../repo-worktrees"* ]]
+	[[ "$output" == *"assistant=codex"* ]]
+	[[ "$output" == *"launch_target=tab"* ]]
+	[[ "$output" == *"worktrees_dir=$expected_dir"* ]]
+	[[ "$output" == *"has_project=0"* ]]
+}
+
+@test "_cwt_select_index_interactive: uses fzf when available" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    selected=\$(_cwt_select_index_interactive 'Worktree > ' 'Select worktree:' 'Choice: ' '' main rm-fzf other)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=2"* ]]
+}
+
+@test "_cwt_select_index_interactive: numbered fallback applies the default choice" {
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    selected=\$(printf '\n' | _cwt_select_index_interactive 'Base branch > ' 'Select base branch:' 'Choice (default: 1=HEAD): ' '1' HEAD main)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=1"* ]]
+}
+
+@test "_cwt_worktree_root_action_records: builds suggested current up and child entries" {
+	create_test_repo
+	mkdir -p "$TEST_TMPDIR/shared"
+
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_git_root='$REPO_DIR'
+    _cwt_worktree_root_action_records '$TEST_TMPDIR' 'repo'
+    for record in \"\${reply[@]}\"; do
+      echo \"kind=\$(_cwt_record_kind \"\$record\") value=\$(_cwt_record_value \"\$record\") label=\$(_cwt_record_label \"\$record\")\"
+    done
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"kind=suggested"* ]]
+	[[ "$output" == *"label=Create or use $TEST_TMPDIR/repo-worktrees"* ]]
+	[[ "$output" == *"kind=current"* ]]
+	[[ "$output" == *"label=Use $TEST_TMPDIR as the worktree root"* ]]
+	[[ "$output" == *"kind=up"* ]]
+	[[ "$output" == *"kind=child"* ]]
+	[[ "$output" == *"label=Browse shared/"* ]]
+}
+
+@test "_cwt_setup_option_records: includes legacy detected browse and skip entries" {
+	create_test_repo
+	mkdir -p "$REPO_DIR/.claude/worktrees"
+
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_git_root='$REPO_DIR'
+    _cwt_config_legacy_worktree_dir='../legacy-worktrees'
+    _cwt_setup_option_records
+    for record in \"\${reply[@]}\"; do
+      echo \"kind=\$(_cwt_record_kind \"\$record\") label=\$(_cwt_record_label \"\$record\")\"
+    done
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"kind=legacy label=Use the legacy cwt setting for this project: ../legacy-worktrees"* ]]
+	[[ "$output" == *"kind=detected label=Reuse existing Claude worktrees:"* ]]
+	[[ "$output" == *"kind=browse label=Browse for another worktree folder"* ]]
+	[[ "$output" == *"kind=skip label=Not now. Use the default for this run only"* ]]
+}
+
+@test "_cwt_parse_shared_launch_option: returns updated launch state through reply" {
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_parse_shared_launch_option '--assistant' 'codex' 'claude' 'current' 'default' '0'
+    echo \"assistant=\${reply[1]}\"
+    echo \"target=\${reply[2]}\"
+    echo \"permission=\${reply[3]}\"
+    echo \"explicit=\${reply[4]}\"
+    echo \"consumed=\${reply[5]}\"
+    echo \"requested=\${reply[6]}\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"assistant=codex"* ]]
+	[[ "$output" == *"target=current"* ]]
+	[[ "$output" == *"permission=default"* ]]
+	[[ "$output" == *"explicit=0"* ]]
+	[[ "$output" == *"consumed=2"* ]]
+	[[ "$output" == *"requested=1"* ]]
+}
+
+@test "_cwt_collect_managed_worktrees: accepts explicit git and worktree roots" {
+	create_test_repo
+	mkdir -p "$REPO_DIR/.worktrees"
+	git -C "$REPO_DIR" worktree add "$REPO_DIR/.worktrees/feature" -b feature main >/dev/null
+	local expected_path
+	expected_path="$(cd "$REPO_DIR/.worktrees/feature" && pwd -P)"
+
+	run zsh -c "
+    export NO_COLOR=1
+    source '$CWT_SH'
+    _cwt_git_root='/tmp/not-the-repo'
+    _cwt_worktrees_dir='/tmp/not-the-worktrees'
+    _cwt_collect_managed_worktrees '$REPO_DIR' '$REPO_DIR/.worktrees'
+    echo \"names=\${_cwt_worktree_names_cache[*]}\"
+    echo \"path=\$(_cwt_worktree_path_from_name feature)\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"names=feature"* ]]
+	[[ "$output" == *"path=$expected_path"* ]]
+}
+
+@test "completion helpers: resolve project worktree dir via shared config helpers" {
+	create_test_repo
+	local repo_real
+	local expected_dir
+	repo_real="$(cd "$REPO_DIR" && pwd -P)"
+	expected_dir="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
+
+	mkdir -p "$XDG_CONFIG_HOME/cwt"
+	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+version: 1
+projects:
+  - git_root: '$repo_real'
+    worktree_dir: '../repo-worktrees'
+EOF
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$PROJECT_DIR/completions/_cwt'
+    echo \"project_dir=\$(_cwt_project_worktree_dir)\"
+    echo \"resolved_dir=\$(_cwt_resolve_worktree_dir)\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"project_dir=../repo-worktrees"* ]]
+	[[ "$output" == *"resolved_dir=$expected_dir"* ]]
+}
+
+@test "completion helpers: default to .worktrees when only legacy config exists" {
+	create_test_repo
+	local expected_dir
+	expected_dir="$(cd "$REPO_DIR" && pwd -P)/.worktrees"
+
+	mkdir -p "$XDG_CONFIG_HOME/cwt"
+	cat >"$XDG_CONFIG_HOME/cwt/config" <<'EOF'
+export CWT_WORKTREE_DIR='../legacy-worktrees'
+EOF
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$PROJECT_DIR/completions/_cwt'
+    echo \"resolved_dir=\$(_cwt_resolve_worktree_dir)\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"resolved_dir=$expected_dir"* ]]
+}
+
 @test "_cwt_is_valid_assistant: accepts supported assistants" {
 	run zsh -c "
     export NO_COLOR=1

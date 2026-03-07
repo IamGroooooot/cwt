@@ -3,6 +3,18 @@
 # Zsh completion for cwt - AI Worktree Manager
 # ─────────────────────────────────────────────────────────────────────────────
 
+typeset -g _cwt_completion_file="${${(%):-%N}:A}"
+typeset -g _cwt_completion_root="${_cwt_completion_file:h:h}"
+
+(( $+functions[_cwt_completion_ensure_shared_helpers] )) || _cwt_completion_ensure_shared_helpers() {
+  (( $+functions[_cwt_load_project_config] )) && (( $+functions[_cwt_resolve_worktrees_dir] )) && \
+    (( $+functions[_cwt_collect_managed_worktrees] )) && return 0
+
+  local cwt_sh="${_cwt_completion_root}/cwt.sh"
+  [[ -f "$cwt_sh" ]] || return 1
+  source "$cwt_sh"
+}
+
 # Resolve the shared repository root (works in linked worktrees too).
 (( $+functions[_cwt_repo_root] )) || _cwt_repo_root() {
   local current_root git_common_dir
@@ -20,119 +32,41 @@
   echo "${git_common_dir:A:h}"
 }
 
-(( $+functions[_cwt_yaml_unquote] )) || _cwt_yaml_unquote() {
-  local value="$1"
-  local first_char
-  local last_char
+(( $+functions[_cwt_completion_prepare_context] )) || _cwt_completion_prepare_context() {
+  local git_root
+  git_root=$(_cwt_repo_root) || return 1
+  _cwt_completion_ensure_shared_helpers || return 1
 
-  if (( ${#value} >= 2 )); then
-    first_char="${value[1]}"
-    last_char="${value[-1]}"
-  fi
-
-  if [[ "$first_char" == "'" && "$last_char" == "'" ]]; then
-    value="${value#\'}"
-    value="${value%\'}"
-    value="${value//\'\'/\'}"
-  elif [[ "$first_char" == '"' && "$last_char" == '"' ]]; then
-    value="${value#\"}"
-    value="${value%\"}"
-    value="${value//\\\"/\"}"
-    value="${value//\\\\/\\}"
-  fi
-
-  print -r -- "$value"
+  _cwt_load_config
+  typeset -g _cwt_git_root="$git_root"
+  _cwt_load_project_config
 }
 
 (( $+functions[_cwt_project_worktree_dir] )) || _cwt_project_worktree_dir() {
-  local git_root config_file line current_git_root worktree_dir legacy_dir
-  git_root=$(_cwt_repo_root) || return 1
-
-  [[ -n "$CWT_WORKTREE_DIR" ]] && {
-    print -r -- "$CWT_WORKTREE_DIR"
-    return 0
-  }
-
-  config_file="${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
-  [[ -f "$config_file" ]] || return 1
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    case "$line" in
-      "  - git_root: "*)
-        current_git_root=$(_cwt_yaml_unquote "${line#"  - git_root: "}")
-        current_git_root="${current_git_root:A}"
-        ;;
-      "    worktree_dir: "*)
-        [[ "$current_git_root" == "$git_root" ]] || continue
-        worktree_dir=$(_cwt_yaml_unquote "${line#"    worktree_dir: "}")
-        print -r -- "$worktree_dir"
-        return 0
-        ;;
-      CWT_WORKTREE_DIR=*)
-        legacy_dir="${line#CWT_WORKTREE_DIR=}"
-        legacy_dir="${(Q)legacy_dir}"
-        ;;
-    esac
-  done < "$config_file"
-
-  [[ -n "$legacy_dir" ]] && {
-    print -r -- "$legacy_dir"
-    return 0
-  }
-
+  _cwt_completion_prepare_context || return 1
+  [[ -n "$CWT_WORKTREE_DIR" ]] && print -r -- "$CWT_WORKTREE_DIR" && return 0
+  [[ -n "$_cwt_config_current_project_worktree_dir" ]] && print -r -- "$_cwt_config_current_project_worktree_dir" && return 0
   return 1
 }
 
 # Resolve configured worktree dir relative to the main repo root.
 (( $+functions[_cwt_resolve_worktree_dir] )) || _cwt_resolve_worktree_dir() {
-  local git_root configured_dir resolved_dir
-  git_root=$(_cwt_repo_root) || return 1
-  configured_dir=$(_cwt_project_worktree_dir 2>/dev/null)
-
-  if [[ -z "$configured_dir" ]]; then
-    resolved_dir="${git_root}/.worktrees"
-  else
-    resolved_dir="$configured_dir"
-    case "$resolved_dir" in
-      "~")
-        resolved_dir="$HOME"
-        ;;
-      "~/"*)
-        resolved_dir="$HOME/${resolved_dir#~/}"
-        ;;
-      /*)
-        ;;
-      *)
-        resolved_dir="${git_root}/${resolved_dir}"
-        ;;
-    esac
-  fi
-
-  print -r -- "${resolved_dir:A}"
+  _cwt_completion_prepare_context || return 1
+  _cwt_resolve_worktrees_dir
 }
 
 # List existing cwt-managed worktree names.
 (( $+functions[_cwt_worktree_names] )) || _cwt_worktree_names() {
-  local git_root wt_dir
-  git_root=$(_cwt_repo_root) || return
+  local git_root worktrees_dir
+  _cwt_completion_prepare_context || return
 
-  wt_dir=$(_cwt_resolve_worktree_dir) || return
-
-  [[ -d "$wt_dir" ]] || return
-
-  local managed_root line wt_path
-  managed_root="${wt_dir:A}"
+  git_root="$_cwt_git_root"
+  worktrees_dir=$(_cwt_resolve_worktrees_dir) || return
+  [[ -d "$worktrees_dir" ]] || return
 
   local -a names
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    [[ "$line" == worktree\ * ]] || continue
-
-    wt_path="${line#worktree }"
-    wt_path="${wt_path:A}"
-    [[ "$wt_path" == "$managed_root/"* ]] || continue
-
-    names+=("${wt_path#$managed_root/}")
-  done < <(git -C "$git_root" worktree list --porcelain 2>/dev/null)
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
+  names=("${_cwt_worktree_names_cache[@]}")
 
   if (( ${#names} > 1 )); then
     names=(${(on)names})
