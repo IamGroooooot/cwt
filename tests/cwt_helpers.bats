@@ -413,7 +413,7 @@ EOF
 	[[ "$output" == *"resolved_dir=$expected_dir"* ]]
 }
 
-@test "sourcing cwt after compinit registers completion and completion path" {
+@test "sourcing cwt after compinit keeps cwt completion autoloadable" {
 	local expected_completion_dir
 	expected_completion_dir="$(cd "$PROJECT_DIR/completions" && pwd -P)"
 
@@ -422,13 +422,14 @@ EOF
     autoload -Uz compinit
     compinit -D
     source '$CWT_SH'
-    echo \"mapping=\${_comps[cwt]-<none>}\"
     echo \"has_completion_dir=\$(( \${fpath[(Ie)$expected_completion_dir]} > 0 ))\"
+    autoload -Uz +X _cwt
+    echo \"completion_loaded=\$(( \$+functions[_cwt] > 0 ))\"
   "
 
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"mapping=_cwt"* ]]
 	[[ "$output" == *"has_completion_dir=1"* ]]
+	[[ "$output" == *"completion_loaded=1"* ]]
 }
 
 @test "_cwt_is_valid_assistant: accepts supported assistants" {
