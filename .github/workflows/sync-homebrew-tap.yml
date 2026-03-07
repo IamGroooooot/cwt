@@ -1,0 +1,92 @@
+name: Sync Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to sync (for example v0.2.14)
+        required: true
+        type: string
+
+jobs:
+  sync-homebrew-tap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAP_REPO: IamGroooooot/homebrew-cwt
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            tag="${{ inputs.tag }}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid tag: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+      - name: Render formula
+        run: |
+          ./scripts/render-homebrew-formula.sh \
+            --tag "${{ steps.release.outputs.tag }}" \
+            --output Formula/cwt.rb
+
+      - name: Commit formula back to source repo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- Formula/cwt.rb; then
+            echo "Formula already up to date in source repo."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cwt.rb
+          git commit -m "Update Homebrew formula for ${{ steps.release.outputs.tag }}"
+          git push
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          path: homebrew-tap
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      - name: Sync formula to tap repo
+        shell: bash
+        working-directory: homebrew-tap
+        run: |
+          set -euo pipefail
+
+          mkdir -p Formula
+          cp ../Formula/cwt.rb Formula/cwt.rb
+
+          if [[ -z "$(git status --short -- Formula/cwt.rb)" ]]; then
+            echo "Tap formula already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cwt.rb
+          git commit -m "Update cwt formula for ${{ steps.release.outputs.tag }}"
+          git push

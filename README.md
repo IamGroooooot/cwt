@@ -58,23 +58,22 @@ It installs `cwt`, adds the `source` line, and enables zsh completion automatica
 brew install IamGroooooot/cwt/cwt
 ```
 
+Homebrew resolves `IamGroooooot/cwt` to the tap repository `IamGroooooot/homebrew-cwt`.
 After installing via Homebrew, follow the caveats output so your `.zshrc` points at the Homebrew prefix.
 
 <details>
 <summary>Advanced Homebrew</summary>
 
 ```sh
-# latest committed code from this tap
+# latest main branch from IamGroooooot/cwt
 brew install --HEAD IamGroooooot/cwt/cwt
 
-# test the current local checkout (committed changes only)
-brew untap IamGroooooot/cwt
-brew tap IamGroooooot/cwt "$(pwd)"
-brew install --HEAD IamGroooooot/cwt/cwt
+# local checkout or uncommitted changes
+source ./cwt.sh
 ```
 
-Use `brew install` for the latest tagged release and `--HEAD` for the current tap checkout.
-If you need uncommitted local edits, source `./cwt.sh` directly instead of going through Homebrew.
+Use `brew install` for the latest tagged release and `--HEAD` for the latest `main` commit from `IamGroooooot/cwt`.
+Homebrew 5 requires formulae to live in a tap, so local checkout testing should source `./cwt.sh` directly instead of going through Homebrew.
 
 </details>
 
@@ -276,7 +275,7 @@ If you installed via Homebrew, update with:
 brew upgrade IamGroooooot/cwt/cwt
 ```
 
-If you installed with `--HEAD`, fetch the latest tap commit with:
+If you installed with `--HEAD`, fetch the latest `main` commit with:
 
 ```sh
 brew upgrade --fetch-HEAD IamGroooooot/cwt/cwt

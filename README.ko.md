@@ -58,23 +58,22 @@ curl -fsSL https://raw.githubusercontent.com/IamGroooooot/cwt/main/install.sh | 
 brew install IamGroooooot/cwt/cwt
 ```
 
+Homebrew는 `IamGroooooot/cwt`를 tap 저장소 `IamGroooooot/homebrew-cwt`로 해석합니다.
 Homebrew로 설치한 뒤에는 caveats 출력에 따라 `.zshrc`가 Homebrew prefix를 가리키도록 설정하세요.
 
 <details>
 <summary>고급 Homebrew</summary>
 
 ```sh
-# 이 tap의 최신 커밋
+# IamGroooooot/cwt의 최신 main 브랜치
 brew install --HEAD IamGroooooot/cwt/cwt
 
-# 현재 로컬 체크아웃 테스트 (커밋된 변경만 반영)
-brew untap IamGroooooot/cwt
-brew tap IamGroooooot/cwt "$(pwd)"
-brew install --HEAD IamGroooooot/cwt/cwt
+# 로컬 체크아웃 또는 커밋 전 변경 테스트
+source ./cwt.sh
 ```
 
-`brew install`은 최신 태그 릴리스를 설치하고, `--HEAD`는 현재 tap 체크아웃을 설치합니다.
-커밋되지 않은 로컬 변경까지 반영해야 하면 Homebrew 대신 `./cwt.sh`를 직접 source 하세요.
+`brew install`은 최신 태그 릴리스를 설치하고, `--HEAD`는 `IamGroooooot/cwt`의 최신 `main` 커밋을 설치합니다.
+Homebrew 5부터는 포뮬러가 tap 안에 있어야 하므로, 로컬 체크아웃 테스트는 Homebrew 대신 `./cwt.sh`를 직접 source 하세요.
 
 </details>
 
@@ -276,7 +275,7 @@ Homebrew로 설치한 경우:
 brew upgrade IamGroooooot/cwt/cwt
 ```
 
-`--HEAD`로 설치했다면 다음 명령으로 최신 tap 커밋을 가져오세요:
+`--HEAD`로 설치했다면 다음 명령으로 최신 `main` 커밋을 가져오세요:
 
 ```sh
 brew upgrade --fetch-HEAD IamGroooooot/cwt/cwt

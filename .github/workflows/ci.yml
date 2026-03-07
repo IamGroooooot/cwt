@@ -30,10 +30,13 @@ jobs:
         run: brew install shellcheck
 
       - name: Run ShellCheck
-        run: shellcheck install.sh uninstall.sh
+        run: shellcheck install.sh uninstall.sh scripts/render-homebrew-formula.sh
 
       - name: Check zsh syntax
         run: zsh -n cwt.sh cwt.plugin.zsh completions/_cwt
+
+      - name: Check Formula syntax
+        run: ruby -c Formula/cwt.rb
 
   bats:
     name: BATS Tests (${{ matrix.os }})

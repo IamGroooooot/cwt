@@ -4,7 +4,7 @@ class Cwt < Formula
   url "https://github.com/IamGroooooot/cwt/archive/refs/tags/v0.2.14.tar.gz"
   sha256 "d94468bbfc24d90673c183f2d31e5fbc96ba022ab2adb7d7ad5b98203ab39409"
   license "MIT"
-  head "file://#{File.expand_path("..", __dir__)}", using: :git, branch: "main"
+  head "https://github.com/IamGroooooot/cwt.git", branch: "main"
 
   depends_on "git"
   depends_on "zsh"
