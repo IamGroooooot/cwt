@@ -243,6 +243,28 @@ EOF
   [ -f "$REPO_DIR/.worktrees/include-crlf/config/trim.secret.json" ]
 }
 
+@test "cwt new: .worktreeinclude skips destinations that already exist in the worktree" {
+  echo "committed" > "$REPO_DIR/tracked.txt"
+  git -C "$REPO_DIR" add tracked.txt
+  git -C "$REPO_DIR" commit -m "add tracked file" > /dev/null
+  echo "modified-in-main" > "$REPO_DIR/tracked.txt"
+  cat > "$REPO_DIR/.worktreeinclude" << 'EOF'
+tracked.txt
+EOF
+
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch include-skip HEAD
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".worktreeinclude skipped existing destination: tracked.txt"* ]]
+  run cat "$REPO_DIR/.worktrees/include-skip/tracked.txt"
+  [ "$status" -eq 0 ]
+  [ "$output" = "committed" ]
+}
+
 @test "cwt new: duplicate name returns error" {
   # Create first worktree
   zsh -c "

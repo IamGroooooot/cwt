@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.13"
+CWT_VERSION="0.2.14"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1216,6 +1216,10 @@ EOF
         [[ ! -e "$src" ]] && continue
         rel="${src#${_cwt_git_root}/}"
         dst="${worktree_path}/${rel}"
+        if [[ -e "$dst" || -L "$dst" ]]; then
+          _cwt_log_warn ".worktreeinclude skipped existing destination: $rel"
+          continue
+        fi
         mkdir -p "$(dirname "$dst")" || return 1
         cp -R "$src" "$dst" || return 1
         _cwt_log_item "$rel"
