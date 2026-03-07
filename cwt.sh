@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.22"
+CWT_VERSION="0.2.23"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -68,8 +68,35 @@ typeset -gA _cwt_config_defaults=()
 typeset -g _cwt_config_current_project_worktree_dir=""
 typeset -g _cwt_config_legacy_worktree_dir=""
 
+_cwt_default_config_file_path() {
+  print -r -- "${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config.yaml"
+}
+
+_cwt_legacy_config_file_path() {
+  print -r -- "${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config"
+}
+
 _cwt_config_file_path() {
-  print -r -- "${CWT_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/cwt/config}"
+  print -r -- "${CWT_CONFIG:-$(_cwt_default_config_file_path)}"
+}
+
+_cwt_config_read_path() {
+  if [[ -n "${CWT_CONFIG:-}" ]]; then
+    print -r -- "$CWT_CONFIG"
+    return 0
+  fi
+
+  local default_config
+  local legacy_config
+
+  default_config=$(_cwt_default_config_file_path)
+  legacy_config=$(_cwt_legacy_config_file_path)
+
+  if [[ -f "$default_config" || ! -f "$legacy_config" ]]; then
+    print -r -- "$default_config"
+  else
+    print -r -- "$legacy_config"
+  fi
 }
 
 _cwt_reset_loaded_config() {
@@ -190,7 +217,7 @@ _cwt_load_yaml_config() {
   local current_git_root=""
   local current_worktree_dir=""
 
-  config_file=$(_cwt_config_file_path)
+  config_file=$(_cwt_config_read_path)
   [[ -f "$config_file" ]] || return 0
 
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -233,7 +260,7 @@ _cwt_load_legacy_global_config() {
   local key
   local value
 
-  config_file=$(_cwt_config_file_path)
+  config_file=$(_cwt_config_read_path)
   [[ -f "$config_file" ]] || return 0
 
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -426,6 +453,20 @@ _cwt_worktrees_config_value() {
 
 _cwt_default_worktrees_config_value() {
   _cwt_worktrees_config_value "${_cwt_git_root}/.worktrees"
+}
+
+_cwt_effective_worktrees_config_value() {
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    print -r -- "$CWT_WORKTREE_DIR"
+    return 0
+  fi
+
+  if _cwt_has_project_config; then
+    print -r -- "$_cwt_config_current_project_worktree_dir"
+    return 0
+  fi
+
+  _cwt_default_worktrees_config_value
 }
 
 _cwt_validate_worktrees_dir() {
@@ -916,6 +957,36 @@ _cwt_write_setup_config() {
   }
 }
 
+_cwt_save_project_worktree_config() {
+  local config_value="$1"
+  local config_file="$2"
+  local resolved_dir
+  local previous_value="${_cwt_config_project_worktree_dirs[$_cwt_git_root]-}"
+  local had_previous=0
+
+  resolved_dir=$(_cwt_resolve_worktree_dir_value "$config_value")
+  _cwt_validate_worktrees_dir "$resolved_dir" || return 1
+
+  [[ -n "${_cwt_config_project_worktree_dirs[$_cwt_git_root]-}" ]] && had_previous=1
+
+  _cwt_config_project_worktree_dirs[$_cwt_git_root]="$config_value"
+  _cwt_bind_current_project_config
+
+  if ! _cwt_write_setup_config "$config_file" "$config_value"; then
+    if [[ $had_previous -eq 1 ]]; then
+      _cwt_config_project_worktree_dirs[$_cwt_git_root]="$previous_value"
+    else
+      unset "_cwt_config_project_worktree_dirs[$_cwt_git_root]"
+    fi
+    _cwt_bind_current_project_config
+    _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
+    return 1
+  fi
+
+  _cwt_worktrees_dir="$(_cwt_resolve_worktrees_dir)"
+  reply=("$resolved_dir")
+}
+
 _cwt_apply_setup_choice() {
   local config_value="$1"
   local config_file="$2"
@@ -933,6 +1004,33 @@ _cwt_apply_setup_choice() {
   fi
 
   _cwt_log_item "Worktree root: $(_cwt_dim "$_cwt_worktrees_dir")"
+}
+
+_cwt_print_project_config_summary() {
+  local config_file="$(_cwt_config_file_path)"
+  local stored_value="<none>"
+  local source_label="default (.worktrees)"
+
+  if _cwt_has_project_config; then
+    stored_value="$_cwt_config_current_project_worktree_dir"
+    source_label="project config"
+  fi
+
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    source_label="env override (CWT_WORKTREE_DIR)"
+  fi
+
+  echo "" >&2
+  _cwt_log_info "Current cwt config for this project."
+  _cwt_log_item "Project: $(_cwt_bold "$_cwt_git_root")"
+  _cwt_log_item "Config file: $(_cwt_dim "$config_file")"
+  _cwt_log_item "Stored worktree root: $(_cwt_dim "$stored_value")"
+  _cwt_log_item "Active worktree root: $(_cwt_dim "$_cwt_worktrees_dir")"
+  _cwt_log_item "Source: $(_cwt_dim "$source_label")"
+
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    _cwt_log_warn "CWT_WORKTREE_DIR is overriding the saved project config in this shell."
+  fi
 }
 
 _cwt_should_run_setup_wizard() {
@@ -2295,6 +2393,122 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Subcommand: cwt config
+# ═══════════════════════════════════════════════════════════════════════════
+
+_cwt_config() {
+  local show_only=0
+  local browse=0
+  local use_default=0
+  local positional=()
+  local arg
+
+  for arg in "$@"; do
+    case "$arg" in
+      --help|-h)
+        cat <<EOF
+$(_cwt_bold 'cwt config') - Show or update the current project's worktree root
+
+$(_cwt_bold 'USAGE')
+  cwt config [options] [worktree-dir]
+
+$(_cwt_bold 'ARGUMENTS')
+  worktree-dir   New default save path for this project's worktrees.
+                 Relative paths resolve from the main git root.
+
+$(_cwt_bold 'OPTIONS')
+  -h, --help     Show this help
+  --show         Show current project config only
+  --browse       Interactively browse for a worktree root
+  --default      Reset this project to the default $(_cwt_bold '.worktrees') root
+
+$(_cwt_bold 'EXAMPLES')
+  cwt config
+  cwt config --show
+  cwt config ../repo-worktrees
+  cwt config /Users/me/worktrees/project-name
+  cwt config --browse
+  cwt config --default
+EOF
+        return 0
+        ;;
+      --show)
+        show_only=1
+        ;;
+      --browse)
+        browse=1
+        ;;
+      --default)
+        use_default=1
+        ;;
+      -*)
+        _cwt_log_error "Unknown option for cwt config: $(_cwt_bold "$arg")"
+        echo "  Run $(_cwt_bold 'cwt config --help') for usage." >&2
+        return 1
+        ;;
+      *)
+        positional+=("$arg")
+        ;;
+    esac
+  done
+
+  local config_file="$(_cwt_config_file_path)"
+  local config_value=""
+  local explicit_changes=$(( browse + use_default + ${#positional[@]} ))
+  local saved_root
+
+  if [[ $show_only -eq 1 && $explicit_changes -gt 0 ]]; then
+    _cwt_log_error "$(_cwt_bold '--show') cannot be combined with a new worktree root."
+    return 1
+  fi
+
+  if [[ $explicit_changes -gt 1 ]]; then
+    _cwt_log_error "Choose one of: $(_cwt_bold '--browse'), $(_cwt_bold '--default'), or an explicit path."
+    return 1
+  fi
+
+  if [[ $show_only -eq 1 || $explicit_changes -eq 0 ]]; then
+    _cwt_print_project_config_summary
+    if [[ $explicit_changes -eq 0 ]]; then
+      _cwt_log_item "Run $(_cwt_bold 'cwt config --browse') or $(_cwt_bold 'cwt config <path>') to change it."
+    fi
+    return 0
+  fi
+
+  if [[ $browse -eq 1 ]]; then
+    if ! _cwt_can_use_fzf && ! _cwt_is_interactive; then
+      _cwt_log_error "$(_cwt_bold '--browse') requires an interactive terminal or fzf."
+      return 1
+    fi
+
+    saved_root=$(_cwt_browse_for_worktree_root)
+    [[ $? -eq 0 ]] || {
+      _cwt_log_warn "Cancelled."
+      return 0
+    }
+    config_value=$(_cwt_worktrees_config_value "$saved_root")
+  elif [[ $use_default -eq 1 ]]; then
+    config_value="$(_cwt_default_worktrees_config_value)"
+  else
+    config_value="$(_cwt_worktrees_config_value "$(_cwt_resolve_worktree_dir_value "${positional[1]}")")"
+  fi
+
+  _cwt_save_project_worktree_config "$config_value" "$config_file" || {
+    _cwt_log_error "Failed to save project config."
+    return 1
+  }
+
+  saved_root="${reply[1]}"
+  _cwt_log_success "Saved cwt config to $(_cwt_bold "$config_file")."
+  _cwt_log_item "Worktree root: $(_cwt_dim "$saved_root")"
+
+  if [[ -n "$CWT_WORKTREE_DIR" ]]; then
+    _cwt_log_warn "CWT_WORKTREE_DIR is still overriding this shell."
+    _cwt_log_item "Active worktree root: $(_cwt_dim "$_cwt_worktrees_dir")"
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Subcommand: cwt update
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -2414,6 +2628,7 @@ $(_cwt_bold 'COMMANDS')
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
+  config   Show or update the current project worktree root
   update   Self-update cwt
 
 $(_cwt_bold 'GLOBAL OPTIONS')
@@ -2433,6 +2648,7 @@ $(_cwt_bold 'EXAMPLES')
   cwt cd fix-auth --assistant gemini --tab  # Launch gemini in tmux/zellij tab
   cwt rm fix-auth                           # Remove worktree "fix-auth"
   cwt rm -f fix-auth                        # Force remove (skip confirmation)
+  cwt config ../repo-worktrees              # Change this project's worktree root
   cwt update                                # Update cwt to latest version
   cwt -q new fix-auth main                  # Create worktree quietly
 
@@ -2479,6 +2695,7 @@ $(_cwt_bold 'COMMANDS')
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
+  config   Show or update the current project worktree root
   update   Self-update cwt
 
 $(_cwt_bold 'GLOBAL OPTIONS')
@@ -2493,6 +2710,11 @@ EOF
     update)
       shift
       _cwt_update "$@"
+      ;;
+    config)
+      shift
+      _cwt_require_git || return 1
+      _cwt_config "$@"
       ;;
     new|ls|cd|rm)
       _cwt_require_git || return 1

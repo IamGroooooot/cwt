@@ -76,21 +76,21 @@ teardown() {
   "
 
 	[ "$status" -eq 0 ]
-	[ -f "$XDG_CONFIG_HOME/cwt/config" ]
+	[ -f "$XDG_CONFIG_HOME/cwt/config.yaml" ]
 	[[ "$output" == *"No cwt config found for this project"* ]]
 	[[ "$output" == *"Saved cwt config"* ]]
-	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "worktree_dir: '.worktrees'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "worktree_dir: '.worktrees'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "^CWT_WORKTREE_DIR=" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "^CWT_WORKTREE_DIR=" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 1 ]
 	[ -d "$REPO_DIR/.worktrees/wizard-default" ]
 }
 
 @test "cwt new: wizard preserves existing yaml defaults when adding a project" {
 	mkdir -p "$XDG_CONFIG_HOME/cwt"
-	cat >"$XDG_CONFIG_HOME/cwt/config" <<'EOF'
+	cat >"$XDG_CONFIG_HOME/cwt/config.yaml" <<'EOF'
 version: 1
 defaults:
   default_assistant: 'codex'
@@ -111,11 +111,11 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	run grep -q "default_assistant: 'codex'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "default_assistant: 'codex'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "cmd_codex: 'echo CODEX_FROM_YAML'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "cmd_codex: 'echo CODEX_FROM_YAML'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 }
 
@@ -134,11 +134,11 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	[ -f "$XDG_CONFIG_HOME/cwt/config" ]
+	[ -f "$XDG_CONFIG_HOME/cwt/config.yaml" ]
 	[[ "$output" == *"Worktree root: $expected_root"* ]]
-	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "worktree_dir: '../repo-worktrees'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "worktree_dir: '../repo-worktrees'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 	[ -d "$expected_root/wizard-sibling" ]
 }
@@ -180,7 +180,7 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	run grep -q "worktree_dir: '.claude/worktrees'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "worktree_dir: '.claude/worktrees'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 	[ -d "$REPO_DIR/.claude/worktrees/wizard-claude" ]
 }
@@ -197,7 +197,7 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	run grep -q "worktree_dir: '.codex/worktrees'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "worktree_dir: '.codex/worktrees'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 	[ -d "$REPO_DIR/.codex/worktrees/wizard-codex" ]
 }
@@ -214,7 +214,7 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	run grep -q "worktree_dir: '../shared'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "worktree_dir: '../shared'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 	[ -d "$TEST_TMPDIR/shared/wizard-arrow" ]
 }
@@ -223,7 +223,7 @@ EOF
 	local repo_real
 	repo_real="$(cd "$REPO_DIR" && pwd -P)"
 	mkdir -p "$XDG_CONFIG_HOME/cwt"
-	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+	cat >"$XDG_CONFIG_HOME/cwt/config.yaml" <<EOF
 version: 1
 defaults:
   default_assistant: 'codex'
@@ -249,7 +249,7 @@ EOF
 	mkdir -p "$XDG_CONFIG_HOME/cwt" "$REPO_DIR/apps/api"
 	local repo_real
 	repo_real="$(cd "$REPO_DIR" && pwd -P)"
-	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+	cat >"$XDG_CONFIG_HOME/cwt/config.yaml" <<EOF
 version: 1
 projects:
   - git_root: '$repo_real'
@@ -305,9 +305,9 @@ EOF
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"No cwt config found for this project"* ]]
 	[ -d "$second_repo/.worktrees/second-repo" ]
-	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "git_root: '$repo_real'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
-	run grep -q "git_root: '$second_repo_real'" "$XDG_CONFIG_HOME/cwt/config"
+	run grep -q "git_root: '$second_repo_real'" "$XDG_CONFIG_HOME/cwt/config.yaml"
 	[ "$status" -eq 0 ]
 }
 

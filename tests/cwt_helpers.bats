@@ -211,7 +211,7 @@ teardown() {
 	expected_dir="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
 
 	mkdir -p "$XDG_CONFIG_HOME/cwt"
-	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+	cat >"$XDG_CONFIG_HOME/cwt/config.yaml" <<EOF
 version: 1
 defaults:
   default_assistant: 'codex'
@@ -372,7 +372,7 @@ EOF
 	expected_dir="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
 
 	mkdir -p "$XDG_CONFIG_HOME/cwt"
-	cat >"$XDG_CONFIG_HOME/cwt/config" <<EOF
+	cat >"$XDG_CONFIG_HOME/cwt/config.yaml" <<EOF
 version: 1
 projects:
   - git_root: '$repo_real'
@@ -539,7 +539,7 @@ EOF
   "
 
 	[ "$status" -eq 0 ]
-	[ -f "$XDG_CONFIG_HOME/cwt/config" ]
+	[ -f "$XDG_CONFIG_HOME/cwt/config.yaml" ]
 	[[ "$output" == *"No cwt config found for this project"* ]]
 	[[ "$output" == *"Saved cwt config"* ]]
 }

@@ -148,6 +148,15 @@ _cwt_complete_update() {
     '(-h --help)'{-h,--help}'[Show help]'
 }
 
+_cwt_complete_config() {
+  _arguments -s \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '--show[Show current project config]' \
+    '--browse[Interactively browse for a worktree root]' \
+    '--default[Reset this project to the default .worktrees root]' \
+    ':worktree-dir:_files -/'
+}
+
 _cwt() {
   local -a commands
   commands=(
@@ -155,6 +164,7 @@ _cwt() {
     'ls:List all worktrees with status'
     'cd:Enter an existing worktree'
     'rm:Remove a worktree'
+    'config:Show or update the current project worktree root'
     'update:Self-update cwt'
   )
 
@@ -175,6 +185,7 @@ _cwt() {
         ls)     _cwt_complete_ls     ;;
         cd)     _cwt_complete_cd     ;;
         rm)     _cwt_complete_rm     ;;
+        config) _cwt_complete_config ;;
         update) _cwt_complete_update ;;
       esac
       ;;

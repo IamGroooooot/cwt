@@ -19,7 +19,7 @@ worktree를 생성하고, 새 브랜치를 체크아웃하고, 설정 파일을 
 
 설치한 뒤 셸을 다시 읽고, git 저장소로 이동한 다음 `cwt new`를 실행하면 됩니다.
 기본적으로 `zsh`와 `git`이 필요하고, 어시스턴트 자동 실행이 필요할 때만 해당 CLI를 설치하면 됩니다.
-아직 `~/.config/cwt/config`가 없다면 첫 대화형 실행에서 이 프로젝트의 worktree를 어디에 둘지 짧게 안내합니다. 기본 `.worktrees` 구조를 그대로 쓰거나, 감지된 Claude/Codex worktree 폴더를 재사용하거나, 다른 폴더를 직접 골라 만들 수 있습니다.
+`~/.config/cwt/config.yaml`이 아직 없으면 첫 대화형 실행에서 짧은 setup wizard가 열립니다. 여기서 기본 `.worktrees` 구조를 그대로 쓰거나, 기존 Claude/Codex worktree 폴더를 재사용하거나, 다른 디렉토리를 직접 고를 수 있습니다.
 
 ```sh
 # 설치 (권장)
@@ -108,7 +108,7 @@ source ~/.zshrc
 설치 시 zsh 탭 자동완성이 자동으로 설정됩니다. 설치 후 다음과 같이 사용할 수 있습니다:
 
 ```
-cwt <TAB>        → new, ls, cd, rm, update (설명 포함)
+cwt <TAB>        → new, ls, cd, rm, config, update (설명 포함)
 cwt new <TAB>    → worktree 이름 제안
 cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --launch-target, --current, --split, --tab, --all-permissions, --default-permissions, --yolo, --dangerously-skip-permissions, --no-launch
 cwt cd <TAB>     → 기존 worktree 이름 목록
@@ -139,6 +139,7 @@ cwt [전역 옵션] <명령> [옵션]
   ls       모든 worktree 상태 목록 표시
   cd       기존 worktree로 이동
   rm       worktree 제거
+  config   현재 프로젝트의 worktree 루트 조회 또는 변경
   update   cwt 자체 업데이트
 
 전역 옵션:
@@ -153,6 +154,7 @@ cwt [전역 옵션] <명령> [옵션]
 cwt new fix-auth --assistant codex               # 생성 + 현재 셸에서 실행
 cwt new fix-auth --assistant codex --split       # 생성 + 분할 창에서 실행 (tmux/zellij)
 cwt new fix-auth --no-launch                     # 생성만
+cwt config ../repo-worktrees                     # 이 저장소의 worktree 루트 저장
 ```
 
 ### worktree 생성
@@ -325,17 +327,26 @@ config/*.secret.json
 cwt는 실행할 때마다 선택적 설정 파일을 읽습니다:
 
 ```
-~/.config/cwt/config
+~/.config/cwt/config.yaml
 ```
 
 경로를 변경하려면 `CWT_CONFIG=/path/to/config`를 설정하세요.
 현재 git 프로젝트에 cwt 설정이 없으면 첫 대화형 실행에서 그 프로젝트용 설정 마법사가 자동으로 열립니다.
 마법사는 기본 `.worktrees` 구조, 감지된 Claude/Codex worktree 폴더 재사용, 또는 git root의 부모부터 시작하는 커스텀 폴더 선택을 제공합니다.
 
+현재 저장소의 worktree 루트를 확인하거나 바꾸고 싶다면 `cwt config`를 사용하면 됩니다:
+
+```sh
+cwt config                  # 현재 프로젝트 설정 보기
+cwt config --browse         # 대화형으로 폴더 선택
+cwt config ../repo-worktrees
+cwt config --default        # 다시 .worktrees 사용
+```
+
 ### 설정 옵션
 
 ```yaml
-# ~/.config/cwt/config
+# ~/.config/cwt/config.yaml
 
 version: 1
 
@@ -357,11 +368,11 @@ projects:
 ```
 
 모든 옵션은 선택 사항입니다. 설정하지 않은 값은 기본 동작을 유지합니다.
-`defaults` 블록은 전역 기본값이고, `projects[*].worktree_dir`는 git root별로 분리되어 저장됩니다. 그래서 다른 저장소가 같은 상대 경로를 우연히 공유하지 않습니다.
-project `worktree_dir`는 절대 경로도 사용할 수 있고, 상대 경로를 쓰면 `cwt`를 실행한 현재 위치가 아니라 메인 git root 기준으로 해석합니다.
+`defaults` 블록은 전역 기본값이고, `projects[*].worktree_dir`는 git root별로 따로 저장됩니다. 그래서 저장소마다 다른 worktree 위치를 안전하게 둘 수 있습니다.
+`worktree_dir`는 절대 경로도 사용할 수 있고, 상대 경로를 쓰면 `cwt`를 실행한 현재 위치가 아니라 메인 git root 기준으로 해석합니다.
 안전을 위해 `/`, git root 자체, `.git` 내부처럼 명백히 위험한 위치는 거부합니다.
 커스텀 worktree 루트를 쓰는 경우 `cwt new`는 생성 전에 해석된 실제 경로를 먼저 보여줍니다.
-이전 shell-style 설정 파일도 하위 호환으로 읽어들이며, 다음에 마법사가 저장할 때 YAML로 다시 써줍니다.
+예전 `~/.config/cwt/config` 파일이 남아 있으면 하위 호환으로 읽고, 다음 저장 시점부터는 다시 YAML 형식으로 저장합니다.
 
 ## 동작 원리
 

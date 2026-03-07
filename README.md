@@ -19,7 +19,7 @@ Run `cwt` inside an existing git repository. Shell integration targets `zsh`.
 
 Install it, reload your shell, move into any git repository, and run `cwt new`.
 You need `zsh` and `git`; assistant CLIs are optional unless you want auto-launch.
-If `~/.config/cwt/config` does not exist yet, the first interactive run walks you through where to keep this project's worktrees. You can stick with the default `.worktrees` layout, reuse detected Claude or Codex worktree folders, or pick and create another folder.
+If `~/.config/cwt/config.yaml` is missing, the first interactive run opens a short setup wizard for that repository. You can keep the default `.worktrees` layout, reuse an existing Claude or Codex worktree folder, or choose another directory.
 
 ```sh
 # install (recommended)
@@ -108,7 +108,7 @@ If you install somewhere other than `~/.cwt`, replace that path in both lines ab
 The installer automatically sets up zsh tab completion. After installing, you get:
 
 ```
-cwt <TAB>        → new, ls, cd, rm, update (with descriptions)
+cwt <TAB>        → new, ls, cd, rm, config, update (with descriptions)
 cwt new <TAB>    → suggest worktree name
 cwt new --<TAB>  → --help, --assistant, --claude, --codex, --gemini, --launch-target, --current, --split, --tab, --all-permissions, --default-permissions, --yolo, --dangerously-skip-permissions, --no-launch
 cwt cd <TAB>     → list existing worktree names
@@ -139,6 +139,7 @@ Commands:
   ls       List all worktrees with status
   cd       Enter an existing worktree
   rm       Remove a worktree
+  config   Show or change this project's worktree root
   update   Self-update cwt
 
 Global Options:
@@ -153,6 +154,7 @@ Global Options:
 cwt new fix-auth --assistant codex               # create + launch in current shell
 cwt new fix-auth --assistant codex --split       # create + launch in split pane (tmux/zellij)
 cwt new fix-auth --no-launch                     # create only
+cwt config ../repo-worktrees                     # store a worktree root for this repo
 ```
 
 ### Create a worktree
@@ -325,17 +327,26 @@ config/*.secret.json
 cwt reads an optional config file on each invocation:
 
 ```
-~/.config/cwt/config
+~/.config/cwt/config.yaml
 ```
 
 Override the path with `CWT_CONFIG=/path/to/config`.
 If the current git project does not have a cwt entry yet, the first interactive run opens a setup wizard for that project.
 The wizard offers the default `.worktrees` layout, detected Claude or Codex worktree folders when they exist, or a custom directory picker that starts from the parent of your git root.
 
+Use `cwt config` when you want to inspect or change the worktree root for the current repository:
+
+```sh
+cwt config                  # show current project config
+cwt config --browse         # choose a folder interactively
+cwt config ../repo-worktrees
+cwt config --default        # go back to .worktrees
+```
+
 ### Available options
 
 ```yaml
-# ~/.config/cwt/config
+# ~/.config/cwt/config.yaml
 
 version: 1
 
@@ -357,11 +368,11 @@ projects:
 ```
 
 All options are optional. Unset values keep the default behavior.
-The `defaults` block is global, but `projects[*].worktree_dir` is scoped per git root so different repositories do not share the same relative path by accident.
-Project `worktree_dir` values accept absolute paths too, but relative paths are resolved from the main git root, not from the directory where you run `cwt`.
+The `defaults` block is global, but `projects[*].worktree_dir` is stored per git root so each repository can keep its own worktree location.
+`worktree_dir` accepts absolute paths too. Relative paths are resolved from the main git root, not from the directory where you ran `cwt`.
 For safety, cwt rejects obviously unsafe destinations such as `/`, the git root itself, or anything inside `.git`.
 When a custom worktree root is active, `cwt new` prints the resolved destination before creating anything.
-Legacy shell-style config lines are still read for backward compatibility and are rewritten as YAML the next time the setup wizard saves the file.
+If you still have the old `~/.config/cwt/config` file, cwt will read it as a fallback and switch back to YAML the next time it saves config.
 
 ## How it works
 
