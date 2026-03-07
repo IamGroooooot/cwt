@@ -1,8 +1,8 @@
 class Cwt < Formula
   desc "AI Worktree Manager - git worktrees for parallel coding sessions"
   homepage "https://github.com/IamGroooooot/cwt"
-  url "https://github.com/IamGroooooot/cwt/archive/refs/tags/v0.2.18.tar.gz"
-  sha256 "565039e456cea571d14a70c9e252b37b9bbe9e9d5f0cd95770f9d4537bd7ca9a"
+  url "https://github.com/IamGroooooot/cwt/archive/refs/tags/v0.2.19.tar.gz"
+  sha256 "f4705189023e9b4634d2240280ca9f01007eb04cc23a4751afd5806287474884"
   license "MIT"
   head "https://github.com/IamGroooooot/cwt.git", branch: "main"
 
