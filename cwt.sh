@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.15"
+CWT_VERSION="0.2.16"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1882,6 +1882,14 @@ EOF
 
   case "$subcmd" in
     "")
+      if git rev-parse --show-toplevel >/dev/null 2>&1; then
+        _cwt_require_git || return 1
+        if _cwt_should_run_setup_wizard; then
+          _cwt_maybe_run_setup_wizard || return 1
+          return 0
+        fi
+      fi
+
       cat <<EOF
 $(_cwt_bold 'cwt') $(_cwt_dim "v${CWT_VERSION}") - AI Worktree Manager
 

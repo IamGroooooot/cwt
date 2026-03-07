@@ -317,6 +317,36 @@ teardown() {
   [[ "$output" == *"COMMANDS"* ]]
 }
 
+@test "cwt with no command runs setup wizard inside a git repo when forced" {
+  create_test_repo
+
+  run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf '1\n' | cwt
+  "
+
+  [ "$status" -eq 0 ]
+  [ -f "$XDG_CONFIG_HOME/cwt/config" ]
+  [[ "$output" == *"No cwt config found"* ]]
+  [[ "$output" == *"Saved cwt config"* ]]
+}
+
+@test "cwt with no command outside a git repo still shows usage" {
+  run zsh -c "
+    export NO_COLOR=1
+    cd '$TEST_TMPDIR'
+    source '$CWT_SH'
+    cwt
+  "
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"USAGE"* ]]
+  [[ "$output" == *"COMMANDS"* ]]
+}
+
 # ── cwt (unknown command) ───────────────────────────────────────────
 
 @test "cwt with unknown command returns error" {
