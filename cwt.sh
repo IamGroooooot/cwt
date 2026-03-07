@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.18"
+CWT_VERSION="0.2.19"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -267,6 +267,12 @@ _cwt_is_interactive() {
   [[ -t 0 ]]
 }
 
+_cwt_can_use_fzf() {
+  command -v fzf &>/dev/null || return 1
+  [[ "${CWT_FORCE_FZF:-0}" == "1" ]] && return 0
+  [[ -t 0 && -t 1 && -t 2 ]]
+}
+
 _cwt_prompt_choice() {
   local prompt="$1"
   local default_choice="$2"
@@ -436,6 +442,60 @@ _cwt_print_detected_worktree_roots() {
   done
 }
 
+_cwt_select_line_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local selected
+  local fzf_status
+
+  _cwt_can_use_fzf || return 1
+
+  selected=$(printf '%s\n' "$@" | fzf \
+    --prompt="$prompt" \
+    --border \
+    --header="$header" 2>/dev/null)
+  fzf_status=$?
+
+  if [[ $fzf_status -eq 130 ]]; then
+    return 130
+  fi
+
+  if [[ $fzf_status -ne 0 ]]; then
+    return 1
+  fi
+
+  print -r -- "$selected"
+}
+
+_cwt_select_record_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local selected
+  local fzf_status
+
+  _cwt_can_use_fzf || return 1
+
+  selected=$(printf '%s\n' "$@" | fzf \
+    --delimiter=$'\t' \
+    --with-nth=3.. \
+    --prompt="$prompt" \
+    --border \
+    --header="$header" 2>/dev/null)
+  fzf_status=$?
+
+  if [[ $fzf_status -eq 130 ]]; then
+    return 130
+  fi
+
+  if [[ $fzf_status -ne 0 ]]; then
+    return 1
+  fi
+
+  print -r -- "$selected"
+}
+
 _cwt_read_browse_key() {
   local key
   local next_key
@@ -489,7 +549,82 @@ _cwt_read_browse_key() {
   esac
 }
 
+_cwt_browse_for_worktree_root_with_fzf() {
+  local browse_dir="${_cwt_git_root:h}"
+  local repo_name="${_cwt_git_root:t}"
+  local suggested_dir
+  local chosen_dir
+  local record
+  local action_kind
+  local action_value
+  local rest
+  local selected
+  local select_status
+  local -a child_dirs=()
+  local -a action_records=()
+
+  while true; do
+    suggested_dir="${browse_dir}/${repo_name}-worktrees"
+    child_dirs=("$browse_dir"/*(/N))
+
+    action_records=(
+      "suggested"$'\t'"$suggested_dir"$'\t'"Create or use ${suggested_dir}"
+      "current"$'\t'"$browse_dir"$'\t'"Use ${browse_dir} as the worktree root"
+    )
+
+    if [[ "$browse_dir" != "/" ]]; then
+      action_records+=("up"$'\t'"${browse_dir:h}"$'\t'"Go up to ${browse_dir:h}")
+    fi
+
+    for chosen_dir in "${child_dirs[@]}"; do
+      action_records+=("child"$'\t'"$chosen_dir"$'\t'"Browse ${chosen_dir:t}/")
+    done
+
+    selected=$(_cwt_select_record_with_fzf \
+      "Worktree folder > " \
+      "Enter: choose  ESC: cancel" \
+      "${action_records[@]}")
+    select_status=$?
+
+    case "$select_status" in
+      0)
+        ;;
+      130)
+        return 1
+        ;;
+      *)
+        return 2
+        ;;
+    esac
+
+    action_kind="${selected%%$'\t'*}"
+    rest="${selected#*$'\t'}"
+    action_value="${rest%%$'\t'*}"
+
+    case "$action_kind" in
+      up|child)
+        browse_dir="$action_value"
+        ;;
+      suggested|current)
+        chosen_dir="${action_value:A}"
+        if [[ "$action_kind" == "current" && "$chosen_dir" == "${_cwt_git_root:h}" ]]; then
+          _cwt_confirm "Use $chosen_dir directly? Worktrees will sit beside your projects." || continue
+        fi
+        _cwt_validate_worktrees_dir "$chosen_dir" || continue
+        mkdir -p "$chosen_dir" 2>/dev/null || {
+          _cwt_log_error "Failed to create $(_cwt_bold "$chosen_dir")."
+          continue
+        }
+        print -r -- "$chosen_dir"
+        return 0
+        ;;
+    esac
+  done
+}
+
 _cwt_browse_for_worktree_root() {
+  local selected_root
+  local browse_status
   local browse_dir="${_cwt_git_root:h}"
   local repo_name="${_cwt_git_root:t}"
   local suggested_dir
@@ -501,6 +636,24 @@ _cwt_browse_for_worktree_root() {
   local -a action_kinds=()
   local -a action_values=()
   local -a action_labels=()
+
+  if _cwt_can_use_fzf; then
+    selected_root=$(_cwt_browse_for_worktree_root_with_fzf)
+    browse_status=$?
+
+    case "$browse_status" in
+      0)
+        print -r -- "$selected_root"
+        return 0
+        ;;
+      1)
+        return 1
+        ;;
+      *)
+        _cwt_log_warn "fzf failed. Falling back to arrow navigation."
+        ;;
+    esac
+  fi
 
   while true; do
     suggested_dir="${browse_dir}/${repo_name}-worktrees"
@@ -693,9 +846,12 @@ _cwt_maybe_run_setup_wizard() {
   local browse_status
   local choice
   local index
+  local selected_record
+  local selected_status
   local -a option_kinds=()
   local -a option_labels=()
   local -a option_values=()
+  local -a option_records=()
   local detected_line detected_label detected_path
 
   _cwt_should_run_setup_wizard || return 0
@@ -735,18 +891,49 @@ _cwt_maybe_run_setup_wizard() {
   option_labels+=("Not now. Use the default for this run only")
 
   while true; do
+    choice=""
     echo "" >&2
     _cwt_log_info "Okay. Choose another location."
-    index=1
-    for choice in "${option_labels[@]}"; do
-      echo "   $(_cwt_dim "$index)") $choice" >&2
-      ((index++))
-    done
 
-    choice=$(_cwt_prompt_choice "Choose another option [1]: " "1")
-    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#option_kinds[@]} )); then
-      _cwt_log_error "Invalid selection."
-      continue
+    if _cwt_can_use_fzf; then
+      option_records=()
+      for (( index = 1; index <= ${#option_kinds[@]}; index++ )); do
+        option_records+=("${index}"$'\t'"${option_kinds[$index]}"$'\t'"${option_labels[$index]}")
+      done
+
+      selected_record=$(_cwt_select_record_with_fzf \
+        "Setup option > " \
+        "Enter: choose  ESC: cancel" \
+        "${option_records[@]}")
+      selected_status=$?
+
+      case "$selected_status" in
+        0)
+          choice="${selected_record%%$'\t'*}"
+          ;;
+        130)
+          _cwt_log_warn "Cancelled."
+          return 0
+          ;;
+        *)
+          _cwt_log_warn "fzf failed. Falling back to numbered selection."
+          choice=""
+          ;;
+      esac
+    fi
+
+    if [[ -z "$choice" ]]; then
+      index=1
+      for choice in "${option_labels[@]}"; do
+        echo "   $(_cwt_dim "$index)") $choice" >&2
+        ((index++))
+      done
+
+      choice=$(_cwt_prompt_choice "Choose another option [1]: " "1")
+      if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#option_kinds[@]} )); then
+        _cwt_log_error "Invalid selection."
+        continue
+      fi
     fi
 
     case "${option_kinds[$choice]}" in
@@ -868,18 +1055,16 @@ _cwt_select_worktree_interactive() {
   local num
   local name
 
-  if command -v fzf &>/dev/null; then
-    selected=$(printf '%s\n' "${names[@]}" | fzf \
-      --prompt="$fzf_prompt" \
-      --height=40% \
-      --border \
-      --header="ESC: cancel  Enter: select" 2>/dev/null)
+  if _cwt_can_use_fzf; then
+    selected=$(_cwt_select_line_with_fzf "$fzf_prompt" "ESC: cancel  Enter: select" "${names[@]}")
     fzf_status=$?
     if [[ $fzf_status -ne 0 && $fzf_status -ne 130 ]]; then
       selected=""
       _cwt_log_warn "fzf failed. Falling back to numbered selection."
     fi
   fi
+
+  [[ $fzf_status -eq 130 ]] && return 1
 
   if [[ -z "$selected" && $fzf_status -ne 130 ]]; then
     echo "" >&2
@@ -1456,12 +1641,8 @@ EOF
       base_branch="HEAD"
     else
       local fzf_status=1
-      if command -v fzf &>/dev/null; then
-        base_branch=$(printf '%s\n' "${branches[@]}" | fzf \
-          --prompt="Base branch > " \
-          --height=40% \
-          --border \
-          --header="ESC: cancel  Enter: select" 2>/dev/null)
+      if _cwt_can_use_fzf; then
+        base_branch=$(_cwt_select_line_with_fzf "Base branch > " "ESC: cancel  Enter: select" "${branches[@]}")
         fzf_status=$?
         if [[ $fzf_status -eq 130 ]]; then
           _cwt_log_warn "Cancelled."

@@ -171,7 +171,7 @@ cwt new fix-auth --dangerously-skip-permissions  # 단축: --assistant claude --
 cwt new --no-launch my-task          # 어시스턴트 실행 건너뛰기
 ```
 
-[fzf](https://github.com/junegunn/fzf)가 설치되어 있으면 브랜치 선택이 대화형으로 제공됩니다. 그렇지 않으면 번호 목록이 표시됩니다.
+[fzf](https://github.com/junegunn/fzf)가 설치되어 있으면 브랜치 선택, worktree 선택, setup wizard의 위치/폴더 선택에 우선적으로 사용됩니다. 그렇지 않으면 번호 목록과 화살표 브라우저로 동작합니다.
 기본 `.worktrees` 디렉토리를 사용할 때 `cwt new`는 자동으로 `.gitignore`에 `.worktrees/`를 추가합니다.
 `CWT_AUTO_LAUNCH=false`일 때도 명시적 실행 플래그(`--assistant`, `--split`, `--tab`, `--launch-target`)는 어시스턴트를 실행합니다.
 

@@ -91,3 +91,32 @@ run_cwt_in() {
     $func$args_str
   "
 }
+
+install_fake_fzf() {
+	local bin_dir="$TEST_TMPDIR/bin"
+
+	mkdir -p "$bin_dir"
+	cat >"$bin_dir/fzf" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+input_file=$(mktemp)
+cat >"$input_file"
+
+match_file="${CWT_TEST_FZF_MATCH_FILE:-}"
+if [[ -n "$match_file" && -f "$match_file" ]]; then
+	match=$(head -n 1 "$match_file")
+	if [[ -n "$match" ]]; then
+		tail -n +2 "$match_file" >"${match_file}.tmp" || true
+		mv "${match_file}.tmp" "$match_file"
+		grep -F "$match" "$input_file" | head -n 1
+		rm -f "$input_file"
+		exit 0
+	fi
+fi
+
+	head -n 1 "$input_file"
+	rm -f "$input_file"
+EOF
+	chmod +x "$bin_dir/fzf"
+}

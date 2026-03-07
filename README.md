@@ -171,7 +171,7 @@ cwt new fix-auth --dangerously-skip-permissions  # shortcut: --assistant claude 
 cwt new --no-launch my-task          # skip assistant launch
 ```
 
-If [fzf](https://github.com/junegunn/fzf) is installed, branch selection becomes interactive. Otherwise, a numbered list is shown.
+If [fzf](https://github.com/junegunn/fzf) is installed, cwt prefers it for branch selection, worktree picking, and setup-wizard folder/location choices. Otherwise, numbered lists and the arrow-key browser are used.
 When the default `.worktrees` directory is used, `cwt new` automatically ensures `.worktrees/` is present in `.gitignore`.
 When `CWT_AUTO_LAUNCH=false`, explicit launch flags (for example `--assistant`, `--split`, `--tab`, `--launch-target`) still launch.
 

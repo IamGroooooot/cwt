@@ -143,6 +143,31 @@ EOF
 	[ -d "$expected_root/wizard-sibling" ]
 }
 
+@test "cwt new: first-run wizard can use fzf for folder selection" {
+	install_fake_fzf
+
+	local expected_root
+	expected_root="$(cd "$TEST_TMPDIR" && pwd -P)/repo-worktrees"
+	printf '%s\n%s\n' \
+		"Browse for another worktree folder" \
+		"Create or use ${expected_root}" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_SETUP_WIZARD=1
+    export CWT_FORCE_FZF=1
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    printf 'n\n' | cwt new --no-launch wizard-fzf-folder HEAD
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Worktree root: $expected_root"* ]]
+	[ -d "$expected_root/wizard-fzf-folder" ]
+}
+
 @test "cwt new: first-run wizard can reuse Claude worktrees" {
 	mkdir -p "$REPO_DIR/.claude/worktrees"
 
