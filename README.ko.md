@@ -29,11 +29,20 @@ source ~/.zshrc
 <summary>Homebrew (tap)</summary>
 
 ```sh
-brew tap IamGroooooot/cwt https://github.com/IamGroooooot/cwt
+# 안정 버전
 brew install IamGroooooot/cwt/cwt
+
+# 이 tap의 최신 커밋
+brew install --HEAD IamGroooooot/cwt/cwt
+
+# 현재 로컬 체크아웃 테스트 (커밋된 변경만 반영)
+brew tap IamGroooooot/cwt "$(pwd)"
+brew reinstall --HEAD IamGroooooot/cwt/cwt
 ```
 
 Homebrew로 설치한 후 caveats 출력에 따라 `.zshrc`에 source 라인을 추가하세요.
+`brew install`은 최신 태그 릴리스를 설치하고, `--HEAD`는 현재 tap 체크아웃을 설치합니다.
+커밋되지 않은 로컬 변경까지 반영해야 하면 Homebrew 대신 `./cwt.sh`를 직접 source 하세요.
 
 </details>
 
@@ -226,6 +235,12 @@ Homebrew로 설치한 경우:
 
 ```sh
 brew upgrade IamGroooooot/cwt/cwt
+```
+
+`--HEAD`로 설치했다면 다음 명령으로 최신 tap 커밋을 가져오세요:
+
+```sh
+brew upgrade --fetch-HEAD IamGroooooot/cwt/cwt
 ```
 
 플러그인 매니저로 설치한 경우 해당 매니저를 통해 업데이트하거나, `CWT_DIR`을 플러그인 체크아웃 경로로 지정한 후 `cwt update`를 실행하세요.

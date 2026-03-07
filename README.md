@@ -31,11 +31,20 @@ source ~/.zshrc
 <summary>Homebrew (tap)</summary>
 
 ```sh
-brew tap IamGroooooot/cwt https://github.com/IamGroooooot/cwt
+# stable release
 brew install IamGroooooot/cwt/cwt
+
+# latest committed code from this tap
+brew install --HEAD IamGroooooot/cwt/cwt
+
+# test the current local checkout (committed changes only)
+brew tap IamGroooooot/cwt "$(pwd)"
+brew reinstall --HEAD IamGroooooot/cwt/cwt
 ```
 
 After installing via Homebrew, follow the caveats output to add the source line to your `.zshrc`.
+Use `brew install` for the latest tagged release and `--HEAD` for the current tap checkout.
+If you need uncommitted local edits, source `./cwt.sh` directly instead of going through Homebrew.
 
 </details>
 
@@ -228,6 +237,12 @@ If you installed via Homebrew, update with:
 
 ```sh
 brew upgrade IamGroooooot/cwt/cwt
+```
+
+If you installed with `--HEAD`, fetch the latest tap commit with:
+
+```sh
+brew upgrade --fetch-HEAD IamGroooooot/cwt/cwt
 ```
 
 If you installed via a plugin manager, update through the plugin manager, or point `CWT_DIR` to that plugin checkout and run `cwt update`.
