@@ -23,48 +23,48 @@ LEGACY_FPATH_LINE='fpath=("$HOME/.cwt/completions" $fpath)'
 LEGACY_SOURCE_LINE='[[ -f "$HOME/.cwt/cwt.sh" ]] && source "$HOME/.cwt/cwt.sh"'
 
 resolve_target_dir() {
-  target="$1"
+	target="$1"
 
-  [ -n "$target" ] || return 1
+	[ -n "$target" ] || return 1
 
-  if [ -d "$target" ]; then
-    (
-      cd "$target" 2> /dev/null && pwd -P
-    )
-    return $?
-  fi
+	if [ -d "$target" ]; then
+		(
+			cd "$target" 2>/dev/null && pwd -P
+		)
+		return $?
+	fi
 
-  target_parent=$(dirname "$target")
-  [ "$target_parent" != "$target" ] || return 1
-  target_base=$(basename "$target")
-  resolved_parent=$(resolve_target_dir "$target_parent") || return 1
+	target_parent=$(dirname "$target")
+	[ "$target_parent" != "$target" ] || return 1
+	target_base=$(basename "$target")
+	resolved_parent=$(resolve_target_dir "$target_parent") || return 1
 
-  printf '%s/%s\n' "$resolved_parent" "$target_base"
+	printf '%s/%s\n' "$resolved_parent" "$target_base"
 }
 
 normalize_install_dir() {
-  CWT_DIR=$(resolve_target_dir "$CWT_DIR") || {
-    err "Refusing to use unsafe CWT_DIR: $CWT_DIR"
-    exit 1
-  }
+	CWT_DIR=$(resolve_target_dir "$CWT_DIR") || {
+		err "Refusing to use unsafe CWT_DIR: $CWT_DIR"
+		exit 1
+	}
 }
 
 refuse_unsafe_install_dir() {
-  case "$CWT_DIR" in
-    / | "$HOME")
-      err "Refusing to use unsafe CWT_DIR: $CWT_DIR"
-      exit 1
-      ;;
-  esac
+	case "$CWT_DIR" in
+	/ | "$HOME")
+		err "Refusing to use unsafe CWT_DIR: $CWT_DIR"
+		exit 1
+		;;
+	esac
 }
 
 remove_existing_cwt_shell_config() {
-  profile_path="$1"
-  temp_profile="${profile_path}.tmp.$$"
+	profile_path="$1"
+	temp_profile="${profile_path}.tmp.$$"
 
-  [ -f "$profile_path" ] || return 1
+	[ -f "$profile_path" ] || return 1
 
-  awk '
+	awk '
     BEGIN { skip = 0 }
     $0 == block_start { skip = 1; next }
     $0 == block_end { skip = 0; next }
@@ -75,56 +75,56 @@ remove_existing_cwt_shell_config() {
     $0 == legacy_source { next }
     { print }
   ' \
-    block_start="$CWT_BLOCK_START" \
-    block_end="$CWT_BLOCK_END" \
-    block_header="$CWT_BLOCK_START" \
-    legacy_header="$LEGACY_HEADER" \
-    legacy_fpath="$LEGACY_FPATH_LINE" \
-    legacy_source="$LEGACY_SOURCE_LINE" \
-    "$profile_path" > "$temp_profile"
+		block_start="$CWT_BLOCK_START" \
+		block_end="$CWT_BLOCK_END" \
+		block_header="$CWT_BLOCK_START" \
+		legacy_header="$LEGACY_HEADER" \
+		legacy_fpath="$LEGACY_FPATH_LINE" \
+		legacy_source="$LEGACY_SOURCE_LINE" \
+		"$profile_path" >"$temp_profile"
 
-  mv "$temp_profile" "$profile_path"
+	mv "$temp_profile" "$profile_path"
 }
 
 shell_profile_has_cwt_config() {
-  [ -f "$ZSHRC" ] || return 1
+	[ -f "$ZSHRC" ] || return 1
 
-  grep -qF "$CWT_BLOCK_START" "$ZSHRC" 2> /dev/null ||
-    grep -qF "$LEGACY_SOURCE_LINE" "$ZSHRC" 2> /dev/null ||
-    grep -qF "$LEGACY_HEADER" "$ZSHRC" 2> /dev/null
+	grep -qF "$CWT_BLOCK_START" "$ZSHRC" 2>/dev/null ||
+		grep -qF "$LEGACY_SOURCE_LINE" "$ZSHRC" 2>/dev/null ||
+		grep -qF "$LEGACY_HEADER" "$ZSHRC" 2>/dev/null
 }
 
 remove_installation_dir() {
-  if [ -d "$CWT_DIR" ]; then
-    rm -rf "$CWT_DIR"
-    ok "Removed ${CWT_DIR}"
-    return 0
-  fi
+	if [ -d "$CWT_DIR" ]; then
+		rm -rf "$CWT_DIR"
+		ok "Removed ${CWT_DIR}"
+		return 0
+	fi
 
-  info "No cwt directory found."
+	info "No cwt directory found."
 }
 
 remove_shell_profile_config() {
-  if shell_profile_has_cwt_config; then
-    remove_existing_cwt_shell_config "$ZSHRC"
-    ok "Removed cwt from ${ZSHRC}"
-  fi
+	if shell_profile_has_cwt_config; then
+		remove_existing_cwt_shell_config "$ZSHRC"
+		ok "Removed cwt from ${ZSHRC}"
+	fi
 }
 
 print_summary() {
-  echo ""
-  ok "cwt uninstalled."
-  echo ""
+	echo ""
+	ok "cwt uninstalled."
+	echo ""
 }
 
 main() {
-  normalize_install_dir
-  refuse_unsafe_install_dir
+	normalize_install_dir
+	refuse_unsafe_install_dir
 
-  echo ""
-  remove_installation_dir
-  remove_shell_profile_config
-  print_summary
+	echo ""
+	remove_installation_dir
+	remove_shell_profile_config
+	print_summary
 }
 
 main "$@"
