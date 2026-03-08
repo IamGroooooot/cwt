@@ -93,6 +93,26 @@ teardown() {
 	[[ "$output" == *"dirty"* ]]
 }
 
+@test "cwt ls: suppresses local assignment noise when typeset_silent is off" {
+	zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch quiet-ls HEAD
+  " 2>/dev/null
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    unsetopt typeset_silent
+    source '$CWT_SH'
+    cwt ls
+  "
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"quiet-ls"* ]]
+	[[ "$output" != *"status_label="* ]]
+}
+
 @test "cwt ls: lists multiple worktrees" {
 	zsh -c "
     export NO_COLOR=1

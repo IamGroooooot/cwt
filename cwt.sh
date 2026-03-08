@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.25"
+CWT_VERSION="0.2.26"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1920,6 +1920,8 @@ EOF
 # ═══════════════════════════════════════════════════════════════════════════
 
 _cwt_ls() {
+  emulate -L zsh -o typesetsilent
+
   local git_root="$_cwt_git_root"
   local worktrees_dir="$_cwt_worktrees_dir"
 
@@ -1963,16 +1965,17 @@ EOF
     wt_name="${_cwt_worktree_names_cache[$i]}"
     d="${_cwt_worktree_paths_cache[$i]}"
     [[ -z "$wt_name" || -z "$d" ]] && continue
-    local branch=$(git -C "$d" branch --show-current 2>/dev/null)
-    local commit_hash=$(git -C "$d" log -1 --format='%h' 2>/dev/null)
-    local commit_msg=$(git -C "$d" log -1 --format='%s' 2>/dev/null)
-    local commit_ts=$(git -C "$d" log -1 --format='%ct' 2>/dev/null)
-    local relative_time=""
+    local branch commit_hash commit_msg commit_ts relative_time status_label has_untracked
+
+    branch=$(git -C "$d" branch --show-current 2>/dev/null)
+    commit_hash=$(git -C "$d" log -1 --format='%h' 2>/dev/null)
+    commit_msg=$(git -C "$d" log -1 --format='%s' 2>/dev/null)
+    commit_ts=$(git -C "$d" log -1 --format='%ct' 2>/dev/null)
+    relative_time=""
     [[ -n "$commit_ts" ]] && relative_time=$(_cwt_relative_time "$commit_ts")
 
     # Check dirty status (staged, unstaged, and untracked files)
-    local status_label
-    local has_untracked=$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null | head -1)
+    has_untracked=$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null | head -1)
     if git -C "$d" diff --quiet 2>/dev/null && git -C "$d" diff --cached --quiet 2>/dev/null && [[ -z "$has_untracked" ]]; then
       status_label="$(_cwt_green 'clean')"
     else
@@ -2001,12 +2004,19 @@ EOF
 
   # Data table goes to stdout
   for entry in "${entries[@]}"; do
-    local wt_name="${entry%%|*}"; entry="${entry#*|}"
-    local branch="${entry%%|*}"; entry="${entry#*|}"
-    local wt_status="${entry%%|*}"; entry="${entry#*|}"
-    local hash="${entry%%|*}"; entry="${entry#*|}"
-    local msg="${entry%%|*}"; entry="${entry#*|}"
-    local when="$entry"
+    local wt_name branch wt_status hash msg when
+
+    wt_name="${entry%%|*}"
+    entry="${entry#*|}"
+    branch="${entry%%|*}"
+    entry="${entry#*|}"
+    wt_status="${entry%%|*}"
+    entry="${entry#*|}"
+    hash="${entry%%|*}"
+    entry="${entry#*|}"
+    msg="${entry%%|*}"
+    entry="${entry#*|}"
+    when="$entry"
 
     printf "  $(_cwt_bold '%-18s') $(_cwt_blue '%-24s') %s\n" "$wt_name" "$branch" "$wt_status"
     printf "  $(_cwt_dim '%-18s') $(_cwt_dim '%s %s') $(_cwt_dim '(%s)')\n" "" "$hash" "$msg" "$when"
