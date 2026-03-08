@@ -161,6 +161,7 @@ teardown() {
 	run zsh -c "
     export NO_COLOR=1
     export CWT_FORCE_FZF=1
+    export LINES=10
     export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
     export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
     source '$CWT_SH'

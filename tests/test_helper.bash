@@ -105,6 +105,11 @@ set -euo pipefail
 input_file=$(mktemp)
 cat >"$input_file"
 
+args_file="${CWT_TEST_FZF_ARGS_FILE:-}"
+if [[ -n "$args_file" ]]; then
+	printf '%s\n' "$@" >"$args_file"
+fi
+
 match_file="${CWT_TEST_FZF_MATCH_FILE:-}"
 if [[ -n "$match_file" && -f "$match_file" ]]; then
 	match=$(head -n 1 "$match_file")

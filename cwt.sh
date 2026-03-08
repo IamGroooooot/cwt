@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.26"
+CWT_VERSION="0.2.27"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -327,6 +327,52 @@ _cwt_can_use_fzf() {
   [[ -t 0 && ( -t 1 || -t 2 ) ]]
 }
 
+_cwt_terminal_lines() {
+  local terminal_lines=""
+  local tty_size=""
+
+  if [[ "${LINES:-}" == <-> ]] && (( LINES > 0 )); then
+    print -r -- "$LINES"
+    return 0
+  fi
+
+  if [[ -r /dev/tty ]]; then
+    tty_size=$(stty size </dev/tty 2>/dev/null || true)
+    if [[ "$tty_size" == <->" "<-> ]]; then
+      print -r -- "${tty_size%% *}"
+      return 0
+    fi
+  fi
+
+  if command -v tput >/dev/null 2>&1; then
+    terminal_lines=$(tput lines 2>/dev/null || true)
+    if [[ "$terminal_lines" == <-> ]] && (( terminal_lines > 0 )); then
+      print -r -- "$terminal_lines"
+      return 0
+    fi
+  fi
+
+  print -r -- "24"
+}
+
+_cwt_fzf_layout_args() {
+  local terminal_lines="${1:-$(_cwt_terminal_lines)}"
+
+  reply=()
+
+  if (( terminal_lines <= 7 )); then
+    reply+=(--height='~100%' --min-height=4 --layout=reverse)
+    return 0
+  fi
+
+  if (( terminal_lines <= 12 )); then
+    reply+=(--height='~100%' --min-height=8 --layout=reverse --border)
+    return 0
+  fi
+
+  reply+=(--border)
+}
+
 _cwt_prompt_choice() {
   local prompt="$1"
   local default_choice="$2"
@@ -522,15 +568,26 @@ _cwt_select_record_with_fzf() {
   shift 2
   local selected
   local fzf_status
+  local terminal_lines
+  local -a fzf_args
 
   _cwt_can_use_fzf || return 1
 
-  selected=$(printf '%s\n' "$@" | fzf \
-    --delimiter=$'\t' \
-    --with-nth=3.. \
-    --prompt="$prompt" \
-    --border \
-    --header="$header" 2>/dev/null)
+  terminal_lines=$(_cwt_terminal_lines)
+  _cwt_fzf_layout_args "$terminal_lines"
+
+  fzf_args=(
+    --delimiter=$'\t'
+    --with-nth=3..
+    --prompt="$prompt"
+    "${reply[@]}"
+  )
+
+  if (( terminal_lines > 7 )) && [[ -n "$header" ]]; then
+    fzf_args+=(--header="$header")
+  fi
+
+  selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}" 2>/dev/null)
   fzf_status=$?
 
   if [[ $fzf_status -eq 130 ]]; then

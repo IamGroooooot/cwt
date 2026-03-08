@@ -262,6 +262,92 @@ EOF
 	[[ "$output" == *"selected=2"* ]]
 }
 
+@test "_cwt_select_index_interactive: keeps fullscreen fzf layout on normal terminals" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export LINES=24
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export CWT_TEST_FZF_ARGS_FILE='$TEST_TMPDIR/fzf-args'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    selected=\$(_cwt_select_index_interactive 'Worktree > ' 'Select worktree:' 'Choice: ' '' main rm-fzf other)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=2"* ]]
+	run grep -Fx -- "--border" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--header=ESC: cancel  Enter: select" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -F -- "--height=~100%" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -ne 0 ]
+}
+
+@test "_cwt_select_index_interactive: uses compact fzf layout on short terminals" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export LINES=10
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export CWT_TEST_FZF_ARGS_FILE='$TEST_TMPDIR/fzf-args'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    selected=\$(_cwt_select_index_interactive 'Worktree > ' 'Select worktree:' 'Choice: ' '' main rm-fzf other)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=2"* ]]
+	run grep -Fx -- "--height=~100%" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--min-height=8" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--layout=reverse" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--border" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--header=ESC: cancel  Enter: select" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+}
+
+@test "_cwt_select_index_interactive: drops border and header on tiny terminals" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export LINES=6
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export CWT_TEST_FZF_ARGS_FILE='$TEST_TMPDIR/fzf-args'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    selected=\$(_cwt_select_index_interactive 'Worktree > ' 'Select worktree:' 'Choice: ' '' main rm-fzf other)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=2"* ]]
+	run grep -Fx -- "--height=~100%" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--min-height=4" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--layout=reverse" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -eq 0 ]
+	run grep -Fx -- "--border" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -ne 0 ]
+	run grep -F -- "--header=ESC: cancel  Enter: select" "$TEST_TMPDIR/fzf-args"
+	[ "$status" -ne 0 ]
+}
+
 @test "_cwt_select_index_interactive: numbered fallback applies the default choice" {
 	run zsh -c "
     export NO_COLOR=1
