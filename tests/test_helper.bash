@@ -46,7 +46,9 @@ create_test_repo() {
 	git -C "$REPO_DIR" config user.email "test@test.com"
 	git -C "$REPO_DIR" config user.name "Test"
 	echo "init" >"$REPO_DIR/file.txt"
+	printf ".worktrees/\n" >"$REPO_DIR/.gitignore"
 	git -C "$REPO_DIR" add file.txt
+	git -C "$REPO_DIR" add .gitignore
 	git -C "$REPO_DIR" commit -m "initial commit" --quiet
 }
 

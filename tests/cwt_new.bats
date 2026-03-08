@@ -48,7 +48,7 @@ teardown() {
 	[ -d "$REPO_DIR/.worktrees/test-wt" ]
 }
 
-@test "cwt new: adds .worktrees/ to .gitignore when missing" {
+@test "cwt new: refuses to edit .gitignore when .worktrees/ is missing" {
 	rm -f "$REPO_DIR/.gitignore"
 
 	run zsh -c "
@@ -57,10 +57,11 @@ teardown() {
     source '$CWT_SH'
     cwt new --no-launch ignore-check HEAD
   "
-	[ "$status" -eq 0 ]
-	[ -f "$REPO_DIR/.gitignore" ]
-	run grep -E '^[[:space:]]*\.worktrees/?[[:space:]]*$' "$REPO_DIR/.gitignore"
-	[ "$status" -eq 0 ]
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Default worktree root requires .worktrees/ in .gitignore."* ]]
+	[[ "$output" == *"Refusing to edit .gitignore automatically."* ]]
+	[ ! -f "$REPO_DIR/.gitignore" ]
+	[ ! -d "$REPO_DIR/.worktrees/ignore-check" ]
 }
 
 @test "cwt new: first-run wizard can save the default worktree root" {
@@ -290,7 +291,9 @@ EOF
 	git -C "$second_repo" config user.email "test@test.com"
 	git -C "$second_repo" config user.name "Test"
 	echo "init" >"$second_repo/file.txt"
+	printf ".worktrees/\n" >"$second_repo/.gitignore"
 	git -C "$second_repo" add file.txt
+	git -C "$second_repo" add .gitignore
 	git -C "$second_repo" commit -m "initial commit" --quiet
 	second_repo_real="$(cd "$second_repo" && pwd -P)"
 

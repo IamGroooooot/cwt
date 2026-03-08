@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.24"
+CWT_VERSION="0.2.25"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1622,31 +1622,9 @@ _cwt_ensure_default_worktree_ignored() {
     return 0
   fi
 
-  if [[ ! -f "$gitignore_path" ]]; then
-    printf "%s\n" "$ignore_entry" > "$gitignore_path" || {
-      _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
-      return 1
-    }
-    _cwt_log_info "Added $(_cwt_bold "$ignore_entry") to .gitignore."
-    return 0
-  fi
-
-  if [[ -s "$gitignore_path" ]]; then
-    local last_char
-    last_char=$(tail -c 1 "$gitignore_path" 2>/dev/null || true)
-    if [[ "$last_char" != $'\n' ]]; then
-      printf '\n' >> "$gitignore_path" || {
-        _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
-        return 1
-      }
-    fi
-  fi
-
-  printf "%s\n" "$ignore_entry" >> "$gitignore_path" || {
-    _cwt_log_error "Failed to write $(_cwt_bold '.gitignore'). Add $(_cwt_bold "$ignore_entry") manually."
-    return 1
-  }
-  _cwt_log_info "Added $(_cwt_bold "$ignore_entry") to .gitignore."
+  _cwt_log_warn "Default worktree root requires $(_cwt_bold "$ignore_entry") in $(_cwt_bold '.gitignore')."
+  _cwt_log_error "Refusing to edit $(_cwt_bold '.gitignore') automatically. Add $(_cwt_bold "$ignore_entry") manually and rerun."
+  return 1
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
