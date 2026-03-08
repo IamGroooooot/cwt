@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.28"
+CWT_VERSION="0.2.29"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -1688,6 +1688,527 @@ _cwt_ensure_default_worktree_ignored() {
   return 1
 }
 
+_cwt_require_valid_assistant() {
+  local assistant="$1"
+
+  if ! _cwt_is_valid_assistant "$assistant"; then
+    _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
+    _cwt_log_info "Use one of: claude codex gemini"
+    return 1
+  fi
+}
+
+_cwt_require_valid_launch_target() {
+  local launch_target="$1"
+
+  if ! _cwt_is_valid_launch_target "$launch_target"; then
+    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
+    _cwt_log_info "Use one of: current split tab"
+    return 1
+  fi
+}
+
+_cwt_require_valid_permission_mode() {
+  local permission_mode="$1"
+
+  if ! _cwt_is_valid_permission_mode "$permission_mode"; then
+    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
+    _cwt_log_info "Use one of: default full"
+    return 1
+  fi
+}
+
+_cwt_validate_requested_launch() {
+  local should_launch="${1:-0}"
+  local assistant="$2"
+  local launch_target="$3"
+  local permission_mode="$4"
+  local launch_target_explicit="${5:-0}"
+
+  [[ "$should_launch" == "1" ]] || return 0
+
+  _cwt_require_valid_assistant "$assistant" || return 1
+  _cwt_require_valid_launch_target "$launch_target" || return 1
+  _cwt_require_valid_permission_mode "$permission_mode" || return 1
+
+  if [[ "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
+    _cwt_preflight_launch_target "$launch_target" "$launch_target_explicit" || return 1
+  fi
+}
+
+_cwt_resolve_new_name() {
+  local name="$1"
+  local worktrees_dir="$2"
+  local worktree_path
+
+  if [[ -z "$name" ]]; then
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions] [--no-launch]" >&2
+      return 1
+    fi
+    echo -n "$(_cwt_cyan '?') Worktree name: " >&2
+    read name
+    [[ -z "$name" ]] && { _cwt_log_error "Name is required."; return 1; }
+  fi
+
+  worktree_path="${worktrees_dir}/${name}"
+  if [[ -d "$worktree_path" ]]; then
+    _cwt_log_error "Worktree already exists: $(_cwt_bold "$name")"
+    return 1
+  fi
+
+  reply=("$name" "$worktree_path")
+}
+
+_cwt_resolve_new_base_branch() {
+  local base_branch="$1"
+  local git_root="$2"
+
+  [[ -z "$base_branch" ]] && base_branch="$(_cwt_default_base_branch)"
+  if [[ -n "$base_branch" ]]; then
+    print -r -- "$base_branch"
+    return 0
+  fi
+
+  local branches=("HEAD" $(git -C "$git_root" branch --format='%(refname:short)' 2>/dev/null))
+  if ! _cwt_is_interactive; then
+    print -r -- "HEAD"
+    return 0
+  fi
+
+  local selected_index
+  local select_status
+  selected_index=$(_cwt_select_index_interactive \
+    "Base branch > " \
+    "Select base branch:" \
+    "Choice (default: 1=HEAD): " \
+    "1" \
+    "${branches[@]}")
+  select_status=$?
+
+  case "$select_status" in
+    0)
+      print -r -- "${branches[$selected_index]}"
+      ;;
+    130)
+      _cwt_log_warn "Cancelled."
+      return 130
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_cwt_resolve_new_branch_name() {
+  local branch_name="$1"
+  local git_root="$2"
+  local name="$3"
+  local rand
+  local attempts=0
+
+  if [[ -n "$branch_name" ]]; then
+    print -r -- "$branch_name"
+    return 0
+  fi
+
+  while (( attempts < 5 )); do
+    rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
+    branch_name="wt/${name}-${rand}"
+    git -C "$git_root" rev-parse --verify "refs/heads/$branch_name" &>/dev/null || break
+    ((attempts++))
+  done
+
+  if (( attempts >= 5 )); then
+    _cwt_log_error "Could not generate a unique branch name. Specify one manually."
+    return 1
+  fi
+
+  print -r -- "$branch_name"
+}
+
+_cwt_create_worktree() {
+  local git_root="$1"
+  local worktrees_dir="$2"
+  local name="$3"
+  local branch_name="$4"
+  local worktree_path="$5"
+  local base_branch="$6"
+
+  echo "" >&2
+  if [[ "$worktrees_dir" != "${git_root}/.worktrees" ]]; then
+    _cwt_log_info "Using custom worktree root: $(_cwt_bold "$worktrees_dir")"
+  fi
+  _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."
+
+  git -C "$git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1
+  if [[ $? -ne 0 ]]; then
+    _cwt_log_error "Failed to create worktree."
+    return 1
+  fi
+
+  _cwt_log_success "Worktree created."
+}
+
+_cwt_copy_worktreeinclude_entries() {
+  local git_root="$1"
+  local worktree_path="$2"
+  local include_file="${git_root}/.worktreeinclude"
+
+  [[ -f "$include_file" ]] || return 0
+
+  _cwt_log_info "Copying files from .worktreeinclude..."
+
+  local pattern
+  local trimmed_pattern
+  local -a files
+  local src src_path rel dst dst_path
+
+  while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+    pattern="${pattern%$'\r'}"
+    trimmed_pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+    trimmed_pattern="${trimmed_pattern%"${trimmed_pattern##*[![:space:]]}"}"
+
+    [[ -z "$trimmed_pattern" || "$trimmed_pattern" == \#* ]] && continue
+
+    files=( "${git_root}"/${~trimmed_pattern}(N) )
+    if (( ${#files[@]} == 0 )); then
+      if [[ "$trimmed_pattern" == *[\*\?\[]* ]]; then
+        _cwt_log_warn ".worktreeinclude pattern matched nothing: $trimmed_pattern"
+      fi
+      continue
+    fi
+
+    for src in "${files[@]}"; do
+      [[ ! -e "$src" ]] && continue
+      src_path="${src:A}"
+      if ! _cwt_path_is_within "$git_root" "$src_path"; then
+        _cwt_log_warn ".worktreeinclude skipped path outside repo: $trimmed_pattern"
+        continue
+      fi
+
+      rel="${src_path#${git_root}/}"
+      if [[ -z "$rel" || "$rel" == "$src_path" ]]; then
+        _cwt_log_warn ".worktreeinclude skipped unsupported entry: $trimmed_pattern"
+        continue
+      fi
+
+      dst="${worktree_path}/${rel}"
+      dst_path="${dst:A}"
+      if ! _cwt_path_is_within "$worktree_path" "$dst_path"; then
+        _cwt_log_warn ".worktreeinclude skipped destination outside worktree: $rel"
+        continue
+      fi
+
+      if [[ -e "$dst" || -L "$dst" ]]; then
+        _cwt_log_warn ".worktreeinclude skipped existing destination: $rel"
+        continue
+      fi
+      mkdir -p "$(dirname "$dst")" || return 1
+      cp -R "$src" "$dst" || return 1
+      _cwt_log_item "$rel"
+    done
+  done < "$include_file"
+}
+
+_cwt_print_new_worktree_summary() {
+  local name="$1"
+  local branch_name="$2"
+  local base_branch="$3"
+  local worktree_path="$4"
+
+  {
+    echo ""
+    echo "  $(_cwt_dim '┌──────────────────────────────────────────────')"
+    echo "  $(_cwt_dim '│') $(_cwt_green '✓') Worktree ready"
+    echo "  $(_cwt_dim '│')"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Name')     $name"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Branch')   $branch_name"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Base')     $base_branch"
+    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Path')     $(_cwt_dim "$worktree_path")"
+    echo "  $(_cwt_dim '└──────────────────────────────────────────────')"
+    echo ""
+  } >&2
+}
+
+_cwt_finish_new_worktree() {
+  local worktree_path="$1"
+  local no_launch="$2"
+  local assistant="$3"
+  local launch_target="$4"
+  local launch_target_explicit="$5"
+  local permission_mode="$6"
+
+  pushd "$worktree_path" > /dev/null
+  if [[ $no_launch -eq 0 ]]; then
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
+  else
+    _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
+  fi
+  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
+}
+
+_cwt_resolve_rm_selection() {
+  local selected="$1"
+  local git_root="$2"
+  local worktrees_dir="$3"
+  local worktree_path
+
+  if [[ ! -d "$worktrees_dir" ]]; then
+    if [[ -n "$selected" ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      return 1
+    fi
+    _cwt_log_info "No worktrees to remove."
+    return 2
+  fi
+
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
+  local worktree_names=("${_cwt_worktree_names_cache[@]}")
+
+  if [[ ${#worktree_names[@]} == 0 ]]; then
+    if [[ -n "$selected" ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+      return 1
+    fi
+    _cwt_log_info "No worktrees to remove."
+    return 2
+  fi
+
+  if [[ -n "$selected" ]]; then
+    if ! _cwt_name_in_list "$selected" "${worktree_names[@]}"; then
+      _cwt_log_error "Worktree not found: $(_cwt_bold "$selected")"
+      _cwt_log_info "Available: ${worktree_names[*]}"
+      return 1
+    fi
+  else
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt rm <name> [-f|--force]" >&2
+      return 1
+    fi
+    selected=$(_cwt_select_worktree_interactive "Remove worktree > " "Select worktree to remove:" "${worktree_names[@]}") || return 1
+  fi
+
+  worktree_path=$(_cwt_worktree_path_from_name "$selected")
+  reply=("$selected" "$worktree_path")
+}
+
+_cwt_confirm_rm_selection() {
+  local force="$1"
+  local selected="$2"
+  local branch="$3"
+  local worktree_path="$4"
+  local confirm
+
+  [[ $force -eq 1 ]] && return 0
+
+  if ! _cwt_is_interactive; then
+    _cwt_log_error "Confirmation required in non-interactive mode."
+    echo "  Re-run with $(_cwt_bold '--force') to remove non-interactively." >&2
+    return 1
+  fi
+
+  echo "" >&2
+  _cwt_log_warn "This will remove:"
+  _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
+  [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
+  _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
+  echo "" >&2
+  echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): " >&2
+  read confirm
+  if [[ "$confirm" != [yY] ]]; then
+    _cwt_log_warn "Cancelled."
+    return 2
+  fi
+}
+
+_cwt_remove_worktree_directory() {
+  local force="$1"
+  local current_root="$2"
+  local worktree_path="$3"
+  local git_root="$4"
+  local selected="$5"
+  local rm_output
+  local force_confirm
+
+  if [[ "${current_root:A}" == "${worktree_path:A}" ]]; then
+    cd "$git_root" || {
+      _cwt_log_error "Failed to move to main repository before removal."
+      return 1
+    }
+    _cwt_log_info "Moved to main repository: $(_cwt_dim "$git_root")"
+  fi
+
+  _cwt_log_info "Removing worktree $(_cwt_bold "$selected")..."
+
+  rm_output=$(git -C "$git_root" worktree remove "$worktree_path" 2>&1)
+  if [[ $? -ne 0 ]]; then
+    if [[ $force -eq 1 ]]; then
+      git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
+      if [[ $? -ne 0 ]]; then
+        _cwt_log_error "Failed to remove worktree."
+        return 1
+      fi
+    else
+      _cwt_log_warn "Worktree has uncommitted changes."
+      echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
+      read force_confirm
+      if [[ "$force_confirm" == [yY] ]]; then
+        git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
+        if [[ $? -ne 0 ]]; then
+          _cwt_log_error "Failed to force remove worktree."
+          return 1
+        fi
+      else
+        _cwt_log_warn "Cancelled. Commit or stash your changes first."
+        return 2
+      fi
+    fi
+  fi
+}
+
+_cwt_cleanup_removed_branch() {
+  local force="$1"
+  local git_root="$2"
+  local branch="$3"
+  local branch_err
+  local branch_confirm
+
+  [[ -n "$branch" ]] || return 0
+
+  branch_err=$(git -C "$git_root" branch -d "$branch" 2>&1)
+  if [[ $? -eq 0 ]]; then
+    _cwt_log_success "Branch $(_cwt_bold "$branch") deleted."
+  elif [[ $force -eq 1 ]]; then
+    git -C "$git_root" branch -D "$branch" 2>/dev/null && \
+      _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+  else
+    _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
+    echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
+    read branch_confirm
+    if [[ "$branch_confirm" == [yY] ]]; then
+      git -C "$git_root" branch -D "$branch" 2>/dev/null && \
+        _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+    else
+      _cwt_log_info "Branch $(_cwt_bold "$branch") kept."
+    fi
+  fi
+}
+
+_cwt_collect_cd_recommendations() {
+  local git_root="$1"
+  local worktrees_dir="$2"
+  local current_root="${3:A}"
+  local d n i
+
+  reply=()
+  [[ -d "$worktrees_dir" ]] || return 0
+
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
+  for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
+    n="${_cwt_worktree_names_cache[$i]}"
+    d="${_cwt_worktree_paths_cache[$i]}"
+    [[ -z "$n" || -z "$d" ]] && continue
+    [[ "${d:A}" == "$current_root" ]] && continue
+    reply+=("$n")
+  done
+}
+
+_cwt_try_return_to_main_repository() {
+  local selected="$1"
+  local current_root="$2"
+  local git_root="$3"
+  local worktrees_dir="$4"
+  local launch_assistant="$5"
+  local assistant="$6"
+  local launch_target="$7"
+  local launch_target_explicit="$8"
+  local permission_mode="$9"
+  local recommendations=()
+
+  [[ -z "$selected" && "${current_root:A}" != "${git_root:A}" ]] || return 2
+
+  cd "$git_root" || {
+    _cwt_log_error "Failed to enter main repository."
+    return 1
+  }
+
+  _cwt_log_success "Entered main repository"
+  _cwt_log_item "$(_cwt_dim "$git_root")"
+
+  _cwt_collect_cd_recommendations "$git_root" "$worktrees_dir" "$current_root"
+  recommendations=("${reply[@]}")
+  if [[ ${#recommendations[@]} -gt 0 ]]; then
+    _cwt_log_info "You can enter: ${recommendations[*]}"
+    _cwt_log_item "Run $(_cwt_bold 'cwt cd <name>') to jump to another worktree."
+  fi
+
+  if [[ $launch_assistant -eq 1 ]]; then
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
+  fi
+
+  return 0
+}
+
+_cwt_resolve_cd_selection() {
+  local selected="$1"
+  local git_root="$2"
+  local worktrees_dir="$3"
+  local wt_path
+
+  if [[ ! -d "$worktrees_dir" ]]; then
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    return 2
+  fi
+
+  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
+  local names=("${_cwt_worktree_names_cache[@]}")
+
+  if [[ ${#names[@]} == 0 ]]; then
+    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
+    return 2
+  fi
+
+  if [[ -n "$selected" ]]; then
+    if ! _cwt_name_in_list "$selected" "${names[@]}"; then
+      _cwt_log_error "Not found: $(_cwt_bold "$selected")"
+      _cwt_log_info "Available: ${names[*]}"
+      return 1
+    fi
+  else
+    if ! _cwt_is_interactive; then
+      _cwt_log_error "Worktree name is required in non-interactive mode."
+      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions]" >&2
+      return 1
+    fi
+    selected=$(_cwt_select_worktree_interactive "Enter worktree > " "Select worktree:" "${names[@]}") || return 1
+  fi
+
+  wt_path=$(_cwt_worktree_path_from_name "$selected")
+  reply=("$selected" "$wt_path")
+}
+
+_cwt_finish_cd() {
+  local selected="$1"
+  local wt_path="$2"
+  local launch_assistant="$3"
+  local assistant="$4"
+  local launch_target="$5"
+  local launch_target_explicit="$6"
+  local permission_mode="$7"
+
+  pushd "$wt_path" > /dev/null
+  _cwt_log_success "Entered $(_cwt_bold "$selected")"
+
+  if [[ $launch_assistant -eq 1 ]]; then
+    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
+  fi
+
+  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Subcommand: cwt new
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1784,196 +2305,36 @@ EOF
 
   local git_root="$_cwt_git_root"
   local worktrees_dir="$_cwt_worktrees_dir"
+  local should_launch=0
+  local name
+  local worktree_path
+  local base_branch
+  local branch_name
 
-  if ! _cwt_is_valid_assistant "$assistant"; then
-    _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
-    _cwt_log_info "Use one of: claude codex gemini"
-    return 1
-  fi
+  _cwt_require_valid_assistant "$assistant" || return 1
+  _cwt_require_valid_launch_target "$launch_target" || return 1
+  [[ $no_launch -eq 0 ]] && should_launch=1
+  _cwt_validate_requested_launch "$should_launch" "$assistant" "$launch_target" "$permission_mode" "$launch_target_explicit" || return 1
 
-  if ! _cwt_is_valid_launch_target "$launch_target"; then
-    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
-    _cwt_log_info "Use one of: current split tab"
-    return 1
-  fi
-
-  if [[ $no_launch -eq 0 ]] && ! _cwt_is_valid_permission_mode "$permission_mode"; then
-    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
-    _cwt_log_info "Use one of: default full"
-    return 1
-  fi
-
-  # Fail fast for explicit split/tab requests before mutating repository state.
-  if [[ $no_launch -eq 0 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
-    _cwt_preflight_launch_target "$launch_target" "$launch_target_explicit" || return 1
-  fi
-
-  # 1) Worktree name
-  local name="${positional[1]}"
-  if [[ -z "$name" ]]; then
-    if ! _cwt_is_interactive; then
-      _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt new <name> [base-branch] [branch-name] [--assistant <assistant>] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions] [--no-launch]" >&2
-      return 1
-    fi
-    echo -n "$(_cwt_cyan '?') Worktree name: " >&2
-    read name
-    [[ -z "$name" ]] && { _cwt_log_error "Name is required."; return 1; }
-  fi
-
-  local worktree_path="${worktrees_dir}/${name}"
-  if [[ -d "$worktree_path" ]]; then
-    _cwt_log_error "Worktree already exists: $(_cwt_bold "$name")"
-    return 1
-  fi
+  _cwt_resolve_new_name "${positional[1]}" "$worktrees_dir" || return 1
+  name="${reply[1]}"
+  worktree_path="${reply[2]}"
 
   _cwt_ensure_default_worktree_ignored "$git_root" "$worktrees_dir" || return 1
 
-  # 2) Base branch selection
-  local base_branch="${positional[2]}"
-  [[ -z "$base_branch" ]] && base_branch="$(_cwt_default_base_branch)"
-  if [[ -z "$base_branch" ]]; then
-    local branches=("HEAD" $(git -C "$git_root" branch --format='%(refname:short)' 2>/dev/null))
-    if ! _cwt_is_interactive; then
-      base_branch="HEAD"
-    else
-      local selected_index
-      local select_status
-      selected_index=$(_cwt_select_index_interactive \
-        "Base branch > " \
-        "Select base branch:" \
-        "Choice (default: 1=HEAD): " \
-        "1" \
-        "${branches[@]}")
-      select_status=$?
+  base_branch=$(_cwt_resolve_new_base_branch "${positional[2]}" "$git_root")
+  case $? in
+    0) ;;
+    130) return 0 ;;
+    *) return 1 ;;
+  esac
 
-      case "$select_status" in
-        0)
-          base_branch="${branches[$selected_index]}"
-          ;;
-        130)
-          _cwt_log_warn "Cancelled."
-          return 0
-          ;;
-        *)
-          return 1
-          ;;
-      esac
-    fi
-  fi
+  branch_name=$(_cwt_resolve_new_branch_name "${positional[3]}" "$git_root" "$name") || return 1
 
-  # 3) Branch name (auto-generated, with collision check)
-  local branch_name="${positional[3]}"
-  if [[ -z "$branch_name" ]]; then
-    local rand
-    local attempts=0
-    while (( attempts < 5 )); do
-      rand=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
-      branch_name="wt/${name}-${rand}"
-      git -C "$git_root" rev-parse --verify "refs/heads/$branch_name" &>/dev/null || break
-      ((attempts++))
-    done
-    if (( attempts >= 5 )); then
-      _cwt_log_error "Could not generate a unique branch name. Specify one manually."
-      return 1
-    fi
-  fi
-
-  # 4) Create worktree
-  echo "" >&2
-  if [[ "$worktrees_dir" != "${git_root}/.worktrees" ]]; then
-    _cwt_log_info "Using custom worktree root: $(_cwt_bold "$worktrees_dir")"
-  fi
-  _cwt_log_info "Creating worktree $(_cwt_bold "$name")..."
-
-  git -C "$git_root" worktree add -b "$branch_name" "$worktree_path" "$base_branch" 2>&1
-  if [[ $? -ne 0 ]]; then
-    _cwt_log_error "Failed to create worktree."
-    return 1
-  fi
-
-  _cwt_log_success "Worktree created."
-
-  # 5) .worktreeinclude handling
-  local include_file="${git_root}/.worktreeinclude"
-  if [[ -f "$include_file" ]]; then
-    _cwt_log_info "Copying files from .worktreeinclude..."
-    local pattern
-    local trimmed_pattern
-    local -a files
-    local src src_path rel dst dst_path
-
-    while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-      # Accept CRLF-formatted include files and ignore leading/trailing spaces.
-      pattern="${pattern%$'\r'}"
-      trimmed_pattern="${pattern#"${pattern%%[![:space:]]*}"}"
-      trimmed_pattern="${trimmed_pattern%"${trimmed_pattern##*[![:space:]]}"}"
-
-      [[ -z "$trimmed_pattern" || "$trimmed_pattern" == \#* ]] && continue
-
-      # (N) keeps unmatched globs from throwing "no matches found".
-      files=( "${git_root}"/${~trimmed_pattern}(N) )
-      if (( ${#files[@]} == 0 )); then
-        if [[ "$trimmed_pattern" == *[\*\?\[]* ]]; then
-          _cwt_log_warn ".worktreeinclude pattern matched nothing: $trimmed_pattern"
-        fi
-        continue
-      fi
-
-      for src in "${files[@]}"; do
-        [[ ! -e "$src" ]] && continue
-        src_path="${src:A}"
-        if ! _cwt_path_is_within "$git_root" "$src_path"; then
-          _cwt_log_warn ".worktreeinclude skipped path outside repo: $trimmed_pattern"
-          continue
-        fi
-
-        rel="${src_path#${git_root}/}"
-        if [[ -z "$rel" || "$rel" == "$src_path" ]]; then
-          _cwt_log_warn ".worktreeinclude skipped unsupported entry: $trimmed_pattern"
-          continue
-        fi
-
-        dst="${worktree_path}/${rel}"
-        dst_path="${dst:A}"
-        if ! _cwt_path_is_within "$worktree_path" "$dst_path"; then
-          _cwt_log_warn ".worktreeinclude skipped destination outside worktree: $rel"
-          continue
-        fi
-
-        if [[ -e "$dst" || -L "$dst" ]]; then
-          _cwt_log_warn ".worktreeinclude skipped existing destination: $rel"
-          continue
-        fi
-        mkdir -p "$(dirname "$dst")" || return 1
-        cp -R "$src" "$dst" || return 1
-        _cwt_log_item "$rel"
-      done
-    done < "$include_file"
-  fi
-
-  # 6) Summary box
-  {
-    echo ""
-    echo "  $(_cwt_dim '┌──────────────────────────────────────────────')"
-    echo "  $(_cwt_dim '│') $(_cwt_green '✓') Worktree ready"
-    echo "  $(_cwt_dim '│')"
-    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Name')     $name"
-    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Branch')   $branch_name"
-    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Base')     $base_branch"
-    echo "  $(_cwt_dim '│')  $(_cwt_bold 'Path')     $(_cwt_dim "$worktree_path")"
-    echo "  $(_cwt_dim '└──────────────────────────────────────────────')"
-    echo ""
-  } >&2
-
-  # 7) Enter worktree and optionally launch an assistant
-  pushd "$worktree_path" > /dev/null
-  if [[ $no_launch -eq 0 ]]; then
-    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
-  else
-    _cwt_log_success "Ready in $(_cwt_bold "$worktree_path")"
-  fi
-  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
+  _cwt_create_worktree "$git_root" "$worktrees_dir" "$name" "$branch_name" "$worktree_path" "$base_branch" || return 1
+  _cwt_copy_worktreeinclude_entries "$git_root" "$worktree_path" || return 1
+  _cwt_print_new_worktree_summary "$name" "$branch_name" "$base_branch" "$worktree_path"
+  _cwt_finish_new_worktree "$worktree_path" "$no_launch" "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2100,6 +2461,11 @@ _cwt_rm() {
   local git_root="$_cwt_git_root"
   local current_root="$_cwt_current_root"
   local worktrees_dir="$_cwt_worktrees_dir"
+  local selected
+  local worktree_path
+  local branch
+  local confirm_status
+  local removal_status
 
   for arg in "$@"; do
     case "$arg" in
@@ -2138,134 +2504,40 @@ EOF
     esac
   done
 
-  local selected="${positional[1]}"
-
-  if [[ ! -d "$worktrees_dir" ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
-      return 1
-    fi
-    _cwt_log_info "No worktrees to remove."
-    return 0
-  fi
-
-  # Collect worktree names
-  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
-  local worktree_names=("${_cwt_worktree_names_cache[@]}")
-
-  if [[ ${#worktree_names[@]} -eq 0 ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
-      return 1
-    fi
-    _cwt_log_info "No worktrees to remove."
-    return 0
-  fi
-
-  if [[ -n "$selected" ]]; then
-    if ! _cwt_name_in_list "$selected" "${worktree_names[@]}"; then
-      _cwt_log_error "Worktree not found: $(_cwt_bold "$selected")"
-      _cwt_log_info "Available: ${worktree_names[*]}"
-      return 1
-    fi
-  else
-    if ! _cwt_is_interactive; then
-      _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt rm <name> [-f|--force]" >&2
-      return 1
-    fi
-    selected=$(_cwt_select_worktree_interactive "Remove worktree > " "Select worktree to remove:" "${worktree_names[@]}") || return 1
-  fi
+  _cwt_resolve_rm_selection "${positional[1]}" "$git_root" "$worktrees_dir"
+  case $? in
+    0) ;;
+    2) return 0 ;;
+    *) return 1 ;;
+  esac
+  selected="${reply[1]}"
+  worktree_path="${reply[2]}"
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  local worktree_path
-  worktree_path=$(_cwt_worktree_path_from_name "$selected")
   if [[ -z "$worktree_path" ]]; then
     _cwt_log_error "Worktree path not found for: $(_cwt_bold "$selected")"
     return 1
   fi
-  local branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
+  branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
 
-  # Confirm
-  if [[ $force -eq 0 ]]; then
-    if ! _cwt_is_interactive; then
-      _cwt_log_error "Confirmation required in non-interactive mode."
-      echo "  Re-run with $(_cwt_bold '--force') to remove non-interactively." >&2
-      return 1
-    fi
-    echo "" >&2
-    _cwt_log_warn "This will remove:"
-    _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
-    [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
-    _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
-    echo "" >&2
-    echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): " >&2
-    read confirm
-    if [[ "$confirm" != [yY] ]]; then
-      _cwt_log_warn "Cancelled."
-      return 0
-    fi
-  fi
+  _cwt_confirm_rm_selection "$force" "$selected" "$branch" "$worktree_path"
+  confirm_status=$?
+  case "$confirm_status" in
+    0) ;;
+    2) return 0 ;;
+    *) return 1 ;;
+  esac
 
-  # Remove worktree
-  if [[ "${current_root:A}" == "${worktree_path:A}" ]]; then
-    cd "$git_root" || {
-      _cwt_log_error "Failed to move to main repository before removal."
-      return 1
-    }
-    _cwt_log_info "Moved to main repository: $(_cwt_dim "$git_root")"
-  fi
+  _cwt_remove_worktree_directory "$force" "$current_root" "$worktree_path" "$git_root" "$selected"
+  removal_status=$?
+  case "$removal_status" in
+    0) ;;
+    2) return 0 ;;
+    *) return 1 ;;
+  esac
 
-  _cwt_log_info "Removing worktree $(_cwt_bold "$selected")..."
-
-  local rm_output
-  rm_output=$(git -C "$git_root" worktree remove "$worktree_path" 2>&1)
-  if [[ $? -ne 0 ]]; then
-    if [[ $force -eq 1 ]]; then
-      git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
-      if [[ $? -ne 0 ]]; then
-        _cwt_log_error "Failed to remove worktree."
-        return 1
-      fi
-    else
-      _cwt_log_warn "Worktree has uncommitted changes."
-      echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
-      read force_confirm
-      if [[ "$force_confirm" == [yY] ]]; then
-        git -C "$git_root" worktree remove --force "$worktree_path" 2>&1
-        if [[ $? -ne 0 ]]; then
-          _cwt_log_error "Failed to force remove worktree."
-          return 1
-        fi
-      else
-        _cwt_log_warn "Cancelled. Commit or stash your changes first."
-        return 0
-      fi
-    fi
-  fi
-
-  # Safe branch cleanup: try -d first, ask before -D
-  if [[ -n "$branch" ]]; then
-    local branch_err
-    branch_err=$(git -C "$git_root" branch -d "$branch" 2>&1)
-    if [[ $? -eq 0 ]]; then
-      _cwt_log_success "Branch $(_cwt_bold "$branch") deleted."
-    elif [[ $force -eq 1 ]]; then
-      git -C "$git_root" branch -D "$branch" 2>/dev/null && \
-        _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
-    else
-      _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
-      echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
-      read branch_confirm
-      if [[ "$branch_confirm" == [yY] ]]; then
-        git -C "$git_root" branch -D "$branch" 2>/dev/null && \
-          _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
-      else
-        _cwt_log_info "Branch $(_cwt_bold "$branch") kept."
-      fi
-    fi
-  fi
+  _cwt_cleanup_removed_branch "$force" "$git_root" "$branch"
 
   _cwt_log_success "Worktree $(_cwt_bold "$selected") removed."
 }
@@ -2281,6 +2553,13 @@ _cwt_cd() {
   local launch_target="$(_cwt_default_launch_target)"
   local permission_mode="$(_cwt_default_permission_mode)"
   local launch_target_explicit=0
+  local git_root
+  local current_root
+  local worktrees_dir
+  local selected
+  local main_root
+  local return_status
+  local wt_path
 
   while [[ $# -gt 0 ]]; do
     local arg="$1"
@@ -2353,115 +2632,39 @@ EOF
     esac
   done
 
-  local git_root="$_cwt_git_root"
-  local current_root="$_cwt_current_root"
-  local worktrees_dir="$_cwt_worktrees_dir"
+  git_root="$_cwt_git_root"
+  current_root="$_cwt_current_root"
+  worktrees_dir="$_cwt_worktrees_dir"
+  selected="${positional[1]}"
+  main_root="${git_root:A}"
 
-  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_assistant "$assistant"; then
-    _cwt_log_error "Unknown assistant: $(_cwt_bold "$assistant")"
-    _cwt_log_info "Use one of: claude codex gemini"
-    return 1
-  fi
-
-  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_launch_target "$launch_target"; then
-    _cwt_log_error "Unknown launch target: $(_cwt_bold "$launch_target")"
-    _cwt_log_info "Use one of: current split tab"
-    return 1
-  fi
-
-  if [[ $launch_assistant -eq 1 ]] && ! _cwt_is_valid_permission_mode "$permission_mode"; then
-    _cwt_log_error "Unknown permission mode: $(_cwt_bold "$permission_mode")"
-    _cwt_log_info "Use one of: default full"
-    return 1
-  fi
-
-  if [[ $launch_assistant -eq 1 && "$launch_target_explicit" == "1" && "$launch_target" != "current" ]]; then
-    _cwt_preflight_launch_target "$launch_target" "$launch_target_explicit" || return 1
-  fi
-
-  local selected="${positional[1]}"
-  local main_root="${git_root:A}"
+  _cwt_validate_requested_launch "$launch_assistant" "$assistant" "$launch_target" "$permission_mode" "$launch_target_explicit" || return 1
   current_root="${current_root:A}"
 
-  # When run inside a worktree with no name, return to the main repository.
-  if [[ -z "$selected" && "$current_root" != "$main_root" ]]; then
-    cd "$git_root" || {
-      _cwt_log_error "Failed to enter main repository."
-      return 1
-    }
+  _cwt_try_return_to_main_repository "$selected" "$current_root" "$git_root" "$worktrees_dir" "$launch_assistant" "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode"
+  return_status=$?
+  case "$return_status" in
+    0) return 0 ;;
+    2) ;;
+    *) return 1 ;;
+  esac
 
-    _cwt_log_success "Entered main repository"
-    _cwt_log_item "$(_cwt_dim "$git_root")"
-
-    if [[ -d "$worktrees_dir" ]]; then
-      local recommendations=()
-      _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
-      local d n i
-      for (( i=1; i<=${#_cwt_worktree_names_cache[@]}; i++ )); do
-        n="${_cwt_worktree_names_cache[$i]}"
-        d="${_cwt_worktree_paths_cache[$i]}"
-        [[ -z "$n" || -z "$d" ]] && continue
-        [[ "${d:A}" == "$current_root" ]] && continue
-        recommendations+=("$n")
-      done
-      if [[ ${#recommendations[@]} -gt 0 ]]; then
-        _cwt_log_info "You can enter: ${recommendations[*]}"
-        _cwt_log_item "Run $(_cwt_bold 'cwt cd <name>') to jump to another worktree."
-      fi
-    fi
-
-    if [[ $launch_assistant -eq 1 ]]; then
-      _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
-    fi
-
-    return 0
-  fi
-
-  if [[ ! -d "$worktrees_dir" ]]; then
-    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
-    return 0
-  fi
-
-  # Collect names
-  _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
-  local names=("${_cwt_worktree_names_cache[@]}")
-
-  if [[ ${#names[@]} -eq 0 ]]; then
-    _cwt_log_info "No worktrees yet. Run $(_cwt_bold 'cwt new') to create one."
-    return 0
-  fi
-
-  if [[ -n "$selected" ]]; then
-    if ! _cwt_name_in_list "$selected" "${names[@]}"; then
-      _cwt_log_error "Not found: $(_cwt_bold "$selected")"
-      _cwt_log_info "Available: ${names[*]}"
-      return 1
-    fi
-  else
-    if ! _cwt_is_interactive; then
-      _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt cd <name> [--assistant <assistant>|--claude|--codex|--gemini] [--launch-target <target>|--current|--split|--tab] [--all-permissions|--default-permissions|--yolo|--dangerously-skip-permissions]" >&2
-      return 1
-    fi
-    selected=$(_cwt_select_worktree_interactive "Enter worktree > " "Select worktree:" "${names[@]}") || return 1
-  fi
+  _cwt_resolve_cd_selection "$selected" "$git_root" "$worktrees_dir"
+  case $? in
+    0) ;;
+    2) return 0 ;;
+    *) return 1 ;;
+  esac
+  selected="${reply[1]}"
+  wt_path="${reply[2]}"
 
   [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  local wt_path
-  wt_path=$(_cwt_worktree_path_from_name "$selected")
   if [[ -z "$wt_path" ]]; then
     _cwt_log_error "Worktree path not found: $(_cwt_bold "$selected")"
     return 1
   fi
-  pushd "$wt_path" > /dev/null
-  _cwt_log_success "Entered $(_cwt_bold "$selected")"
-
-  if [[ $launch_assistant -eq 1 ]]; then
-    _cwt_launch_assistant "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
-  fi
-
-  _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
+  _cwt_finish_cd "$selected" "$wt_path" "$launch_assistant" "$assistant" "$launch_target" "$launch_target_explicit" "$permission_mode" || return $?
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
