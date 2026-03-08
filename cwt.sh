@@ -17,7 +17,7 @@
 #   cwt --help                       Show help
 # ─────────────────────────────────────────────────────────────────────────────
 
-CWT_VERSION="0.2.27"
+CWT_VERSION="0.2.28"
 
 # ── ANSI color utilities ────────────────────────────────────────────────────
 # Respects NO_COLOR (https://no-color.org/) and non-interactive pipes
@@ -587,7 +587,11 @@ _cwt_select_record_with_fzf() {
     fzf_args+=(--header="$header")
   fi
 
-  selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}" 2>/dev/null)
+  if [[ -t 2 ]]; then
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}")
+  else
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}" 2>/dev/null)
+  fi
   fzf_status=$?
 
   if [[ $fzf_status -eq 130 ]]; then

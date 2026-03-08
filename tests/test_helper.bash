@@ -110,6 +110,11 @@ if [[ -n "$args_file" ]]; then
 	printf '%s\n' "$@" >"$args_file"
 fi
 
+stderr_text="${CWT_TEST_FZF_STDERR:-}"
+if [[ -n "$stderr_text" ]]; then
+	printf '%s\n' "$stderr_text" >&2
+fi
+
 match_file="${CWT_TEST_FZF_MATCH_FILE:-}"
 if [[ -n "$match_file" && -f "$match_file" ]]; then
 	match=$(head -n 1 "$match_file")

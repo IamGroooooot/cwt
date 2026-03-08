@@ -348,6 +348,26 @@ EOF
 	[ "$status" -ne 0 ]
 }
 
+@test "_cwt_select_index_interactive: suppresses fzf stderr when stderr is not a tty" {
+	install_fake_fzf
+	printf '%s\n' "rm-fzf" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export CWT_TEST_FZF_STDERR='FZF_STDERR_MARKER'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    selected=\$(_cwt_select_index_interactive 'Worktree > ' 'Select worktree:' 'Choice: ' '' main rm-fzf other)
+    echo \"selected=\$selected\"
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"selected=2"* ]]
+	[[ "$output" != *"FZF_STDERR_MARKER"* ]]
+}
+
 @test "_cwt_select_index_interactive: numbered fallback applies the default choice" {
 	run zsh -c "
     export NO_COLOR=1
