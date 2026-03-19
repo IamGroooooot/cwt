@@ -2698,23 +2698,18 @@ _cwt_rm() {
   local git_root="$_cwt_git_root"
   local current_root="$_cwt_current_root"
   local worktrees_dir="$_cwt_worktrees_dir"
-  local selected
-  local worktree_path
-  local branch
-  local confirm_status
-  local removal_status
 
   for arg in "$@"; do
     case "$arg" in
       --help|-h)
         cat <<EOF
-$(_cwt_bold 'cwt rm') - Remove a worktree
+$(_cwt_bold 'cwt rm') - Remove worktree(s)
 
 $(_cwt_bold 'USAGE')
-  cwt rm [options] [name]
+  cwt rm [options] [name...]
 
 $(_cwt_bold 'ARGUMENTS')
-  name          Worktree to remove (prompted if omitted)
+  name...       Worktree(s) to remove (prompted if omitted)
 
 $(_cwt_bold 'OPTIONS')
   -h, --help       Show this help
@@ -2723,7 +2718,8 @@ $(_cwt_bold 'OPTIONS')
 $(_cwt_bold 'EXAMPLES')
   cwt rm fix-auth            # Remove with confirmation
   cwt rm -f fix-auth         # Remove without confirmation
-  cwt rm                     # Interactive selection
+  cwt rm fix-auth refactor   # Remove multiple
+  cwt rm                     # Interactive multi-selection
 EOF
         return 0
         ;;
@@ -2741,42 +2737,61 @@ EOF
     esac
   done
 
-  _cwt_resolve_rm_selection "${positional[1]}" "$git_root" "$worktrees_dir"
+  local -a reply_names=()
+  local -a reply_paths=()
+
+  _cwt_resolve_rm_selections "$git_root" "$worktrees_dir" "${positional[@]}"
   case $? in
     0) ;;
     2) return 0 ;;
     *) return 1 ;;
   esac
-  selected="${reply[1]}"
-  worktree_path="${reply[2]}"
 
-  [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
+  [[ ${#reply_names[@]} -eq 0 ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  if [[ -z "$worktree_path" ]]; then
-    _cwt_log_error "Worktree path not found for: $(_cwt_bold "$selected")"
-    return 1
-  fi
-  branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
-
-  _cwt_confirm_rm_selection "$force" "$selected" "$branch" "$worktree_path"
-  confirm_status=$?
+  _cwt_confirm_rm_selections "$force"
+  local confirm_status=$?
   case "$confirm_status" in
     0) ;;
     2) return 0 ;;
     *) return 1 ;;
   esac
 
-  _cwt_remove_worktree_directory "$force" "$current_root" "$worktree_path" "$git_root" "$selected"
-  removal_status=$?
-  case "$removal_status" in
-    0) ;;
-    2) return 0 ;;
-    *) return 1 ;;
-  esac
+  local count=${#reply_names[@]}
+  local batch=$(( count > 1 ? 1 : 0 ))
+  local succeeded=0 failed=0
+  local -a failed_names=()
+  local name wt_path branch
 
-  _cwt_cleanup_removed_branch "$force" "$git_root" "$branch"
+  for (( i = 1; i <= count; i++ )); do
+    name="${reply_names[$i]}"
+    wt_path="${reply_paths[$i]}"
+    branch=$(git -C "$wt_path" branch --show-current 2>/dev/null)
 
-  _cwt_log_success "Worktree $(_cwt_bold "$selected") removed."
+    _cwt_remove_worktree_directory "$force" "$current_root" "$wt_path" "$git_root" "$name" "$batch"
+    if [[ $? -ne 0 ]]; then
+      (( failed++ ))
+      failed_names+=("$name")
+      continue
+    fi
+
+    _cwt_cleanup_removed_branch "$force" "$git_root" "$branch" "$batch"
+    (( succeeded++ ))
+  done
+
+  if (( count == 1 )); then
+    if (( succeeded == 1 )); then
+      _cwt_log_success "Worktree $(_cwt_bold "$name") removed."
+    fi
+  else
+    (( succeeded > 0 )) && _cwt_log_success "Removed $succeeded worktree(s)."
+    if (( failed > 0 )); then
+      _cwt_log_warn "Failed to remove $failed worktree(s): ${failed_names[*]}"
+    fi
+  fi
+
+  (( failed > 0 && succeeded == 0 )) && return 1
+  return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
