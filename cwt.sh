@@ -2128,15 +2128,18 @@ _cwt_finish_new_worktree() {
   _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
 }
 
-_cwt_resolve_rm_selection() {
-  local selected="$1"
-  local git_root="$2"
-  local worktrees_dir="$3"
-  local worktree_path
+_cwt_resolve_rm_selections() {
+  local git_root="$1"
+  local worktrees_dir="$2"
+  shift 2
+  local -a positional=("$@")
+
+  reply_names=()
+  reply_paths=()
 
   if [[ ! -d "$worktrees_dir" ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+    if [[ ${#positional[@]} -gt 0 ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "${positional[*]}")"
       return 1
     fi
     _cwt_log_info "No worktrees to remove."
@@ -2144,41 +2147,67 @@ _cwt_resolve_rm_selection() {
   fi
 
   _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
-  local worktree_names=("${_cwt_worktree_names_cache[@]}")
+  local -a worktree_names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#worktree_names[@]} == 0 ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+    if [[ ${#positional[@]} -gt 0 ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "${positional[*]}")"
       return 1
     fi
     _cwt_log_info "No worktrees to remove."
     return 2
   fi
 
-  if [[ -n "$selected" ]]; then
-    if ! _cwt_name_in_list "$selected" "${worktree_names[@]}"; then
-      _cwt_log_error "Worktree not found: $(_cwt_bold "$selected")"
+  if [[ ${#positional[@]} -gt 0 ]]; then
+    # Deduplicate positional args
+    local -a unique_args=()
+    local arg
+    for arg in "${positional[@]}"; do
+      _cwt_name_in_list "$arg" "${unique_args[@]}" || unique_args+=("$arg")
+    done
+
+    # Validate all names exist
+    local -a invalid=()
+    for arg in "${unique_args[@]}"; do
+      if ! _cwt_name_in_list "$arg" "${worktree_names[@]}"; then
+        invalid+=("$arg")
+      fi
+    done
+    if [[ ${#invalid[@]} -gt 0 ]]; then
+      _cwt_log_error "Worktree not found: $(_cwt_bold "${invalid[*]}")"
       _cwt_log_info "Available: ${worktree_names[*]}"
       return 1
     fi
+
+    for arg in "${unique_args[@]}"; do
+      reply_names+=("$arg")
+      reply_paths+=("$(_cwt_worktree_path_from_name "$arg")")
+    done
   else
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt rm <name> [-f|--force]" >&2
+      echo "  Usage: cwt rm <name>... [-f|--force]" >&2
       return 1
     fi
-    selected=$(_cwt_select_worktree_interactive "Remove worktree > " "Select worktree to remove:" "${worktree_names[@]}") || return 1
+
+    local selected
+    selected=$(_cwt_select_worktrees_interactive "Remove worktree > " "Select worktree(s) to remove:" "${worktree_names[@]}") || return 1
+
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      reply_names+=("$line")
+      reply_paths+=("$(_cwt_worktree_path_from_name "$line")")
+    done <<< "$selected"
   fi
 
-  worktree_path=$(_cwt_worktree_path_from_name "$selected")
-  reply=("$selected" "$worktree_path")
+  if [[ ${#reply_names[@]} -eq 0 ]]; then
+    return 2
+  fi
 }
 
-_cwt_confirm_rm_selection() {
+_cwt_confirm_rm_selections() {
   local force="$1"
-  local selected="$2"
-  local branch="$3"
-  local worktree_path="$4"
   local confirm
 
   [[ $force -eq 1 ]] && return 0
@@ -2189,14 +2218,36 @@ _cwt_confirm_rm_selection() {
     return 1
   fi
 
-  echo "" >&2
-  _cwt_log_warn "This will remove:"
-  _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
-  [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
-  _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
-  echo "" >&2
-  echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): " >&2
-  read confirm
+  local count=${#reply_names[@]}
+
+  if (( count == 1 )); then
+    local branch
+    branch=$(git -C "${reply_paths[1]}" branch --show-current 2>/dev/null)
+    echo "" >&2
+    _cwt_log_warn "This will remove:"
+    _cwt_log_item "Worktree: $(_cwt_bold "${reply_names[1]}")"
+    [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
+    _cwt_log_item "Path:     $(_cwt_dim "${reply_paths[1]}")"
+    echo "" >&2
+    echo -n "$(_cwt_cyan '?') Remove '${reply_names[1]}'? $(_cwt_dim '(y/N)'): " >&2
+    read confirm
+  else
+    echo "" >&2
+    _cwt_log_warn "This will remove $count worktree(s):"
+    local i branch
+    for (( i = 1; i <= count; i++ )); do
+      branch=$(git -C "${reply_paths[$i]}" branch --show-current 2>/dev/null)
+      if [[ -n "$branch" ]]; then
+        echo "    • ${reply_names[$i]}  (branch: $branch)" >&2
+      else
+        echo "    • ${reply_names[$i]}" >&2
+      fi
+    done
+    echo "" >&2
+    echo -n "$(_cwt_cyan '?') Remove all $count? $(_cwt_dim '(y/N)'): " >&2
+    read confirm
+  fi
+
   if [[ "$confirm" != [yY] ]]; then
     _cwt_log_warn "Cancelled."
     return 2
@@ -2209,6 +2260,7 @@ _cwt_remove_worktree_directory() {
   local worktree_path="$3"
   local git_root="$4"
   local selected="$5"
+  local batch="${6:-0}"
   local rm_output
   local force_confirm
 
@@ -2230,6 +2282,9 @@ _cwt_remove_worktree_directory() {
         _cwt_log_error "Failed to remove worktree."
         return 1
       fi
+    elif [[ $batch -eq 1 ]]; then
+      _cwt_log_warn "Skipping $(_cwt_bold "$selected"): uncommitted changes."
+      return 1
     else
       _cwt_log_warn "Worktree has uncommitted changes."
       echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
@@ -2252,6 +2307,7 @@ _cwt_cleanup_removed_branch() {
   local force="$1"
   local git_root="$2"
   local branch="$3"
+  local batch="${4:-0}"
   local branch_err
   local branch_confirm
 
@@ -2263,6 +2319,8 @@ _cwt_cleanup_removed_branch() {
   elif [[ $force -eq 1 ]]; then
     git -C "$git_root" branch -D "$branch" 2>/dev/null && \
       _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+  elif [[ $batch -eq 1 ]]; then
+    _cwt_log_info "Branch $(_cwt_bold "$branch") kept (unmerged)."
   else
     _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
     echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
