@@ -151,7 +151,7 @@ teardown() {
   "
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"required in non-interactive mode"* ]]
-	[[ "$output" == *"Usage: cwt rm <name> [-f|--force]"* ]]
+	[[ "$output" == *"Usage: cwt rm <name>... [-f|--force]"* ]]
 }
 
 @test "cwt rm: selector helper can use fzf" {
@@ -224,4 +224,114 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"USAGE"* ]]
 	[[ "$output" == *"--force"* ]]
+	[[ "$output" == *"name..."* ]]
+}
+
+@test "cwt rm: force removes multiple worktrees" {
+	zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch wt1 HEAD
+    cwt new --no-launch wt2 HEAD
+  " 2>/dev/null
+
+	[ -d "$REPO_DIR/.worktrees/wt1" ]
+	[ -d "$REPO_DIR/.worktrees/wt2" ]
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm -f wt1 wt2
+  "
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Removed 2 worktree(s)"* ]]
+	[ ! -d "$REPO_DIR/.worktrees/wt1" ]
+	[ ! -d "$REPO_DIR/.worktrees/wt2" ]
+}
+
+@test "cwt rm: invalid name in multi args fails all" {
+	zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch wt1 HEAD
+  " 2>/dev/null
+
+	[ -d "$REPO_DIR/.worktrees/wt1" ]
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm -f wt1 nonexistent
+  "
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"not found"* ]]
+	# wt1 should still exist since validation failed before deletion
+	[ -d "$REPO_DIR/.worktrees/wt1" ]
+}
+
+@test "cwt rm: duplicate args removes only once" {
+	zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch wt1 HEAD
+  " 2>/dev/null
+
+	[ -d "$REPO_DIR/.worktrees/wt1" ]
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm -f wt1 wt1
+  "
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"removed"* ]]
+	[ ! -d "$REPO_DIR/.worktrees/wt1" ]
+}
+
+@test "cwt rm: non-interactive multi args without force returns error" {
+	zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch wt1 HEAD
+    cwt new --no-launch wt2 HEAD
+  " 2>/dev/null
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt rm wt1 wt2 < /dev/null
+  "
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"Confirmation required"* ]]
+	[[ "$output" == *"--force"* ]]
+	[ -d "$REPO_DIR/.worktrees/wt1" ]
+	[ -d "$REPO_DIR/.worktrees/wt2" ]
+}
+
+@test "cwt rm: multi-select helper can use fzf" {
+	install_fake_fzf
+	printf '%s\n' "rm-a" "rm-c" >"$TEST_TMPDIR/fzf-matches"
+
+	run zsh -c "
+    export NO_COLOR=1
+    export CWT_FORCE_FZF=1
+    export LINES=10
+    export CWT_TEST_FZF_MATCH_FILE='$TEST_TMPDIR/fzf-matches'
+    export PATH='$TEST_TMPDIR/bin':\"\$PATH\"
+    source '$CWT_SH'
+    _cwt_select_worktrees_interactive 'Remove > ' 'Select:' rm-a rm-b rm-c
+  "
+
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"rm-a"* ]]
+	[[ "$output" == *"rm-c"* ]]
+	[[ "$output" != *"rm-b"* ]]
 }

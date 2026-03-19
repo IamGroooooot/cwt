@@ -115,15 +115,39 @@ if [[ -n "$stderr_text" ]]; then
 	printf '%s\n' "$stderr_text" >&2
 fi
 
+is_multi=0
+for a in "$@"; do
+	[[ "$a" == "--multi" ]] && is_multi=1
+done
+
 match_file="${CWT_TEST_FZF_MATCH_FILE:-}"
 if [[ -n "$match_file" && -f "$match_file" ]]; then
-	match=$(head -n 1 "$match_file")
-	if [[ -n "$match" ]]; then
-		tail -n +2 "$match_file" >"${match_file}.tmp" || true
-		mv "${match_file}.tmp" "$match_file"
-		grep -F "$match" "$input_file" | head -n 1
+	if [[ $is_multi -eq 1 ]]; then
+		# Multi-select: read all lines from match_file, match each against input
+		found=0
+		while IFS= read -r match || [[ -n "$match" ]]; do
+			[[ -z "$match" ]] && continue
+			result=$(grep -F "$match" "$input_file" | head -n 1)
+			if [[ -n "$result" ]]; then
+				printf '%s\n' "$result"
+				found=1
+			fi
+		done <"$match_file"
+		: >"$match_file"
 		rm -f "$input_file"
-		exit 0
+		if [[ $found -eq 1 ]]; then
+			exit 0
+		fi
+		exit 1
+	else
+		match=$(head -n 1 "$match_file")
+		if [[ -n "$match" ]]; then
+			tail -n +2 "$match_file" >"${match_file}.tmp" || true
+			mv "${match_file}.tmp" "$match_file"
+			grep -F "$match" "$input_file" | head -n 1
+			rm -f "$input_file"
+			exit 0
+		fi
 	fi
 fi
 
