@@ -605,6 +605,166 @@ _cwt_select_record_with_fzf() {
   print -r -- "$selected"
 }
 
+_cwt_select_records_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local selected
+  local fzf_status
+  local terminal_lines
+  local -a fzf_args
+
+  _cwt_can_use_fzf || return 1
+
+  terminal_lines=$(_cwt_terminal_lines)
+  _cwt_fzf_layout_args "$terminal_lines"
+
+  fzf_args=(
+    --multi
+    --delimiter=$'\t'
+    --with-nth=3..
+    --prompt="$prompt"
+    "${reply[@]}"
+  )
+
+  if (( terminal_lines > 7 )) && [[ -n "$header" ]]; then
+    fzf_args+=(--header="$header")
+  fi
+
+  if [[ -t 2 ]]; then
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}")
+  else
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}" 2>/dev/null)
+  fi
+  fzf_status=$?
+
+  if [[ $fzf_status -eq 130 ]]; then
+    return 130
+  fi
+
+  if [[ $fzf_status -ne 0 ]]; then
+    return 1
+  fi
+
+  print -r -- "$selected"
+}
+
+_cwt_select_indices_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local -a labels=("$@")
+  local -a records=()
+  local selected_records
+  local index
+
+  for (( index = 1; index <= ${#labels[@]}; index++ )); do
+    records+=("${index}"$'\t'"${labels[$index]}"$'\t'"${labels[$index]}")
+  done
+
+  selected_records=$(_cwt_select_records_with_fzf "$prompt" "$header" "${records[@]}") || return $?
+
+  local line
+  while IFS= read -r line; do
+    print -r -- "${line%%$'\t'*}"
+  done <<< "$selected_records"
+}
+
+_cwt_prompt_numbered_indices() {
+  local list_title="$1"
+  local prompt="$2"
+  shift 2
+  local -a labels=("$@")
+  local index
+  local choice
+  local max=${#labels[@]}
+
+  echo "" >&2
+  [[ -n "$list_title" ]] && _cwt_log_info "$list_title"
+
+  for (( index = 1; index <= max; index++ )); do
+    echo "   $(_cwt_dim "$index)") ${labels[$index]}" >&2
+  done
+
+  choice=$(_cwt_prompt_choice "$prompt" "")
+  [[ -z "$choice" ]] && return 1
+
+  local -a result=()
+  local token part start end
+
+  # Split on commas
+  for token in ${(s:,:)choice}; do
+    token="${token## }"; token="${token%% }"  # trim spaces
+    if [[ "$token" == "all" ]]; then
+      for (( index = 1; index <= max; index++ )); do
+        result+=("$index")
+      done
+    elif [[ "$token" == *-* ]]; then
+      start="${token%%-*}"; end="${token##*-}"
+      if [[ "$start" =~ ^[0-9]+$ ]] && [[ "$end" =~ ^[0-9]+$ ]] && (( start >= 1 && end <= max && start <= end )); then
+        for (( index = start; index <= end; index++ )); do
+          result+=("$index")
+        done
+      else
+        _cwt_log_error "Invalid range: $token"
+        return 1
+      fi
+    elif [[ "$token" =~ ^[0-9]+$ ]] && (( token >= 1 && token <= max )); then
+      result+=("$token")
+    else
+      _cwt_log_error "Invalid selection: $token"
+      return 1
+    fi
+  done
+
+  if [[ ${#result[@]} -eq 0 ]]; then
+    _cwt_log_error "No valid selection."
+    return 1
+  fi
+
+  # Deduplicate
+  local -a seen=()
+  local idx
+  for idx in "${result[@]}"; do
+    if ! _cwt_name_in_list "$idx" "${seen[@]}"; then
+      seen+=("$idx")
+      print -r -- "$idx"
+    fi
+  done
+}
+
+_cwt_select_indices_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  local numbered_prompt="$3"
+  shift 3
+  local -a labels=("$@")
+  local selected_indices=""
+  local select_status=1
+
+  if _cwt_can_use_fzf; then
+    selected_indices=$(_cwt_select_indices_with_fzf "$fzf_prompt" "ESC: cancel  TAB: toggle  Enter: confirm" "${labels[@]}")
+    select_status=$?
+    case "$select_status" in
+      0)
+        ;;
+      130)
+        return 130
+        ;;
+      *)
+        _cwt_log_warn "fzf failed. Falling back to numbered selection."
+        selected_indices=""
+        ;;
+    esac
+  fi
+
+  if [[ -z "$selected_indices" ]]; then
+    selected_indices=$(_cwt_prompt_numbered_indices "$list_title" "$numbered_prompt" "${labels[@]}") || return 1
+  fi
+
+  print -r -- "$selected_indices"
+}
+
 _cwt_record_kind() {
   print -r -- "${1%%$'\t'*}"
 }
@@ -1306,6 +1466,25 @@ _cwt_select_worktree_interactive() {
   [[ $select_status -eq 0 ]] || return 1
 
   echo "${names[$selected_index]}"
+}
+
+_cwt_select_worktrees_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  shift 2
+  local -a names=("$@")
+  local selected_indices
+  local select_status
+
+  selected_indices=$(_cwt_select_indices_interactive "$fzf_prompt" "$list_title" "Choice (e.g. 1,3 or 1-3 or all): " "${names[@]}")
+  select_status=$?
+  [[ $select_status -eq 130 ]] && return 1
+  [[ $select_status -eq 0 ]] || return 1
+
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && echo "${names[$line]}"
+  done <<< "$selected_indices"
 }
 
 _cwt_default_assistant() {
