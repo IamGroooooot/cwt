@@ -605,6 +605,166 @@ _cwt_select_record_with_fzf() {
   print -r -- "$selected"
 }
 
+_cwt_select_records_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local selected
+  local fzf_status
+  local terminal_lines
+  local -a fzf_args
+
+  _cwt_can_use_fzf || return 1
+
+  terminal_lines=$(_cwt_terminal_lines)
+  _cwt_fzf_layout_args "$terminal_lines"
+
+  fzf_args=(
+    --multi
+    --delimiter=$'\t'
+    --with-nth=3..
+    --prompt="$prompt"
+    "${reply[@]}"
+  )
+
+  if (( terminal_lines > 7 )) && [[ -n "$header" ]]; then
+    fzf_args+=(--header="$header")
+  fi
+
+  if [[ -t 2 ]]; then
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}")
+  else
+    selected=$(printf '%s\n' "$@" | fzf "${fzf_args[@]}" 2>/dev/null)
+  fi
+  fzf_status=$?
+
+  if [[ $fzf_status -eq 130 ]]; then
+    return 130
+  fi
+
+  if [[ $fzf_status -ne 0 ]]; then
+    return 1
+  fi
+
+  print -r -- "$selected"
+}
+
+_cwt_select_indices_with_fzf() {
+  local prompt="$1"
+  local header="$2"
+  shift 2
+  local -a labels=("$@")
+  local -a records=()
+  local selected_records
+  local index
+
+  for (( index = 1; index <= ${#labels[@]}; index++ )); do
+    records+=("${index}"$'\t'"${labels[$index]}"$'\t'"${labels[$index]}")
+  done
+
+  selected_records=$(_cwt_select_records_with_fzf "$prompt" "$header" "${records[@]}") || return $?
+
+  local line
+  while IFS= read -r line; do
+    print -r -- "${line%%$'\t'*}"
+  done <<< "$selected_records"
+}
+
+_cwt_prompt_numbered_indices() {
+  local list_title="$1"
+  local prompt="$2"
+  shift 2
+  local -a labels=("$@")
+  local index
+  local choice
+  local max=${#labels[@]}
+
+  echo "" >&2
+  [[ -n "$list_title" ]] && _cwt_log_info "$list_title"
+
+  for (( index = 1; index <= max; index++ )); do
+    echo "   $(_cwt_dim "$index)") ${labels[$index]}" >&2
+  done
+
+  choice=$(_cwt_prompt_choice "$prompt" "")
+  [[ -z "$choice" ]] && return 1
+
+  local -a result=()
+  local token part start end
+
+  # Split on commas
+  for token in ${(s:,:)choice}; do
+    token="${token## }"; token="${token%% }"  # trim spaces
+    if [[ "$token" == "all" ]]; then
+      for (( index = 1; index <= max; index++ )); do
+        result+=("$index")
+      done
+    elif [[ "$token" == *-* ]]; then
+      start="${token%%-*}"; end="${token##*-}"
+      if [[ "$start" =~ ^[0-9]+$ ]] && [[ "$end" =~ ^[0-9]+$ ]] && (( start >= 1 && end <= max && start <= end )); then
+        for (( index = start; index <= end; index++ )); do
+          result+=("$index")
+        done
+      else
+        _cwt_log_error "Invalid range: $token"
+        return 1
+      fi
+    elif [[ "$token" =~ ^[0-9]+$ ]] && (( token >= 1 && token <= max )); then
+      result+=("$token")
+    else
+      _cwt_log_error "Invalid selection: $token"
+      return 1
+    fi
+  done
+
+  if [[ ${#result[@]} -eq 0 ]]; then
+    _cwt_log_error "No valid selection."
+    return 1
+  fi
+
+  # Deduplicate
+  local -a seen=()
+  local idx
+  for idx in "${result[@]}"; do
+    if ! _cwt_name_in_list "$idx" "${seen[@]}"; then
+      seen+=("$idx")
+      print -r -- "$idx"
+    fi
+  done
+}
+
+_cwt_select_indices_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  local numbered_prompt="$3"
+  shift 3
+  local -a labels=("$@")
+  local selected_indices=""
+  local select_status=1
+
+  if _cwt_can_use_fzf; then
+    selected_indices=$(_cwt_select_indices_with_fzf "$fzf_prompt" "ESC: cancel  TAB: toggle  Enter: confirm" "${labels[@]}")
+    select_status=$?
+    case "$select_status" in
+      0)
+        ;;
+      130)
+        return 130
+        ;;
+      *)
+        _cwt_log_warn "fzf failed. Falling back to numbered selection."
+        selected_indices=""
+        ;;
+    esac
+  fi
+
+  if [[ -z "$selected_indices" ]]; then
+    selected_indices=$(_cwt_prompt_numbered_indices "$list_title" "$numbered_prompt" "${labels[@]}") || return 1
+  fi
+
+  print -r -- "$selected_indices"
+}
+
 _cwt_record_kind() {
   print -r -- "${1%%$'\t'*}"
 }
@@ -1308,6 +1468,25 @@ _cwt_select_worktree_interactive() {
   echo "${names[$selected_index]}"
 }
 
+_cwt_select_worktrees_interactive() {
+  local fzf_prompt="$1"
+  local list_title="$2"
+  shift 2
+  local -a names=("$@")
+  local selected_indices
+  local select_status
+
+  selected_indices=$(_cwt_select_indices_interactive "$fzf_prompt" "$list_title" "Choice (e.g. 1,3 or 1-3 or all): " "${names[@]}")
+  select_status=$?
+  [[ $select_status -eq 130 ]] && return 1
+  [[ $select_status -eq 0 ]] || return 1
+
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && echo "${names[$line]}"
+  done <<< "$selected_indices"
+}
+
 _cwt_default_assistant() {
   _cwt_get_effective_config_value "CWT_DEFAULT_ASSISTANT" "default_assistant" "claude" "1"
 }
@@ -1949,15 +2128,18 @@ _cwt_finish_new_worktree() {
   _cwt_log_item "Run $(_cwt_bold 'popd') to return to your previous directory."
 }
 
-_cwt_resolve_rm_selection() {
-  local selected="$1"
-  local git_root="$2"
-  local worktrees_dir="$3"
-  local worktree_path
+_cwt_resolve_rm_selections() {
+  local git_root="$1"
+  local worktrees_dir="$2"
+  shift 2
+  local -a positional=("$@")
+
+  reply_names=()
+  reply_paths=()
 
   if [[ ! -d "$worktrees_dir" ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+    if [[ ${#positional[@]} -gt 0 ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "${positional[*]}")"
       return 1
     fi
     _cwt_log_info "No worktrees to remove."
@@ -1965,41 +2147,67 @@ _cwt_resolve_rm_selection() {
   fi
 
   _cwt_collect_managed_worktrees "$git_root" "$worktrees_dir"
-  local worktree_names=("${_cwt_worktree_names_cache[@]}")
+  local -a worktree_names=("${_cwt_worktree_names_cache[@]}")
 
   if [[ ${#worktree_names[@]} == 0 ]]; then
-    if [[ -n "$selected" ]]; then
-      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "$selected")"
+    if [[ ${#positional[@]} -gt 0 ]]; then
+      _cwt_log_error "No worktrees found. Cannot remove: $(_cwt_bold "${positional[*]}")"
       return 1
     fi
     _cwt_log_info "No worktrees to remove."
     return 2
   fi
 
-  if [[ -n "$selected" ]]; then
-    if ! _cwt_name_in_list "$selected" "${worktree_names[@]}"; then
-      _cwt_log_error "Worktree not found: $(_cwt_bold "$selected")"
+  if [[ ${#positional[@]} -gt 0 ]]; then
+    # Deduplicate positional args
+    local -a unique_args=()
+    local arg
+    for arg in "${positional[@]}"; do
+      _cwt_name_in_list "$arg" "${unique_args[@]}" || unique_args+=("$arg")
+    done
+
+    # Validate all names exist
+    local -a invalid=()
+    for arg in "${unique_args[@]}"; do
+      if ! _cwt_name_in_list "$arg" "${worktree_names[@]}"; then
+        invalid+=("$arg")
+      fi
+    done
+    if [[ ${#invalid[@]} -gt 0 ]]; then
+      _cwt_log_error "Worktree not found: $(_cwt_bold "${invalid[*]}")"
       _cwt_log_info "Available: ${worktree_names[*]}"
       return 1
     fi
+
+    for arg in "${unique_args[@]}"; do
+      reply_names+=("$arg")
+      reply_paths+=("$(_cwt_worktree_path_from_name "$arg")")
+    done
   else
     if ! _cwt_is_interactive; then
       _cwt_log_error "Worktree name is required in non-interactive mode."
-      echo "  Usage: cwt rm <name> [-f|--force]" >&2
+      echo "  Usage: cwt rm <name>... [-f|--force]" >&2
       return 1
     fi
-    selected=$(_cwt_select_worktree_interactive "Remove worktree > " "Select worktree to remove:" "${worktree_names[@]}") || return 1
+
+    local selected
+    selected=$(_cwt_select_worktrees_interactive "Remove worktree > " "Select worktree(s) to remove:" "${worktree_names[@]}") || return 1
+
+    local line
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      reply_names+=("$line")
+      reply_paths+=("$(_cwt_worktree_path_from_name "$line")")
+    done <<< "$selected"
   fi
 
-  worktree_path=$(_cwt_worktree_path_from_name "$selected")
-  reply=("$selected" "$worktree_path")
+  if [[ ${#reply_names[@]} -eq 0 ]]; then
+    return 2
+  fi
 }
 
-_cwt_confirm_rm_selection() {
+_cwt_confirm_rm_selections() {
   local force="$1"
-  local selected="$2"
-  local branch="$3"
-  local worktree_path="$4"
   local confirm
 
   [[ $force -eq 1 ]] && return 0
@@ -2010,14 +2218,36 @@ _cwt_confirm_rm_selection() {
     return 1
   fi
 
-  echo "" >&2
-  _cwt_log_warn "This will remove:"
-  _cwt_log_item "Worktree: $(_cwt_bold "$selected")"
-  [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
-  _cwt_log_item "Path:     $(_cwt_dim "$worktree_path")"
-  echo "" >&2
-  echo -n "$(_cwt_cyan '?') Remove '$selected'? $(_cwt_dim '(y/N)'): " >&2
-  read confirm
+  local count=${#reply_names[@]}
+
+  if (( count == 1 )); then
+    local branch
+    branch=$(git -C "${reply_paths[1]}" branch --show-current 2>/dev/null)
+    echo "" >&2
+    _cwt_log_warn "This will remove:"
+    _cwt_log_item "Worktree: $(_cwt_bold "${reply_names[1]}")"
+    [[ -n "$branch" ]] && _cwt_log_item "Branch:   $(_cwt_bold "$branch") (will be deleted)"
+    _cwt_log_item "Path:     $(_cwt_dim "${reply_paths[1]}")"
+    echo "" >&2
+    echo -n "$(_cwt_cyan '?') Remove '${reply_names[1]}'? $(_cwt_dim '(y/N)'): " >&2
+    read confirm
+  else
+    echo "" >&2
+    _cwt_log_warn "This will remove $count worktree(s):"
+    local i branch
+    for (( i = 1; i <= count; i++ )); do
+      branch=$(git -C "${reply_paths[$i]}" branch --show-current 2>/dev/null)
+      if [[ -n "$branch" ]]; then
+        echo "    • ${reply_names[$i]}  (branch: $branch)" >&2
+      else
+        echo "    • ${reply_names[$i]}" >&2
+      fi
+    done
+    echo "" >&2
+    echo -n "$(_cwt_cyan '?') Remove all $count? $(_cwt_dim '(y/N)'): " >&2
+    read confirm
+  fi
+
   if [[ "$confirm" != [yY] ]]; then
     _cwt_log_warn "Cancelled."
     return 2
@@ -2030,6 +2260,7 @@ _cwt_remove_worktree_directory() {
   local worktree_path="$3"
   local git_root="$4"
   local selected="$5"
+  local batch="${6:-0}"
   local rm_output
   local force_confirm
 
@@ -2051,6 +2282,9 @@ _cwt_remove_worktree_directory() {
         _cwt_log_error "Failed to remove worktree."
         return 1
       fi
+    elif [[ $batch -eq 1 ]]; then
+      _cwt_log_warn "Skipping $(_cwt_bold "$selected"): uncommitted changes."
+      return 1
     else
       _cwt_log_warn "Worktree has uncommitted changes."
       echo -n "$(_cwt_cyan '?') Force remove anyway? $(_cwt_dim '(y/N)'): " >&2
@@ -2073,6 +2307,7 @@ _cwt_cleanup_removed_branch() {
   local force="$1"
   local git_root="$2"
   local branch="$3"
+  local batch="${4:-0}"
   local branch_err
   local branch_confirm
 
@@ -2084,6 +2319,8 @@ _cwt_cleanup_removed_branch() {
   elif [[ $force -eq 1 ]]; then
     git -C "$git_root" branch -D "$branch" 2>/dev/null && \
       _cwt_log_success "Branch $(_cwt_bold "$branch") force-deleted."
+  elif [[ $batch -eq 1 ]]; then
+    _cwt_log_info "Branch $(_cwt_bold "$branch") kept (unmerged)."
   else
     _cwt_log_warn "Branch $(_cwt_bold "$branch") has unmerged commits."
     echo -n "$(_cwt_cyan '?') Force delete branch? $(_cwt_dim '(y/N)'): " >&2
@@ -2461,23 +2698,18 @@ _cwt_rm() {
   local git_root="$_cwt_git_root"
   local current_root="$_cwt_current_root"
   local worktrees_dir="$_cwt_worktrees_dir"
-  local selected
-  local worktree_path
-  local branch
-  local confirm_status
-  local removal_status
 
   for arg in "$@"; do
     case "$arg" in
       --help|-h)
         cat <<EOF
-$(_cwt_bold 'cwt rm') - Remove a worktree
+$(_cwt_bold 'cwt rm') - Remove worktree(s)
 
 $(_cwt_bold 'USAGE')
-  cwt rm [options] [name]
+  cwt rm [options] [name...]
 
 $(_cwt_bold 'ARGUMENTS')
-  name          Worktree to remove (prompted if omitted)
+  name...       Worktree(s) to remove (prompted if omitted)
 
 $(_cwt_bold 'OPTIONS')
   -h, --help       Show this help
@@ -2486,7 +2718,8 @@ $(_cwt_bold 'OPTIONS')
 $(_cwt_bold 'EXAMPLES')
   cwt rm fix-auth            # Remove with confirmation
   cwt rm -f fix-auth         # Remove without confirmation
-  cwt rm                     # Interactive selection
+  cwt rm fix-auth refactor   # Remove multiple
+  cwt rm                     # Interactive multi-selection
 EOF
         return 0
         ;;
@@ -2504,42 +2737,61 @@ EOF
     esac
   done
 
-  _cwt_resolve_rm_selection "${positional[1]}" "$git_root" "$worktrees_dir"
+  local -a reply_names=()
+  local -a reply_paths=()
+
+  _cwt_resolve_rm_selections "$git_root" "$worktrees_dir" "${positional[@]}"
   case $? in
     0) ;;
     2) return 0 ;;
     *) return 1 ;;
   esac
-  selected="${reply[1]}"
-  worktree_path="${reply[2]}"
 
-  [[ -z "$selected" ]] && { _cwt_log_warn "Cancelled."; return 0; }
+  [[ ${#reply_names[@]} -eq 0 ]] && { _cwt_log_warn "Cancelled."; return 0; }
 
-  if [[ -z "$worktree_path" ]]; then
-    _cwt_log_error "Worktree path not found for: $(_cwt_bold "$selected")"
-    return 1
-  fi
-  branch=$(git -C "$worktree_path" branch --show-current 2>/dev/null)
-
-  _cwt_confirm_rm_selection "$force" "$selected" "$branch" "$worktree_path"
-  confirm_status=$?
+  _cwt_confirm_rm_selections "$force"
+  local confirm_status=$?
   case "$confirm_status" in
     0) ;;
     2) return 0 ;;
     *) return 1 ;;
   esac
 
-  _cwt_remove_worktree_directory "$force" "$current_root" "$worktree_path" "$git_root" "$selected"
-  removal_status=$?
-  case "$removal_status" in
-    0) ;;
-    2) return 0 ;;
-    *) return 1 ;;
-  esac
+  local count=${#reply_names[@]}
+  local batch=$(( count > 1 ? 1 : 0 ))
+  local succeeded=0 failed=0
+  local -a failed_names=()
+  local name wt_path branch
 
-  _cwt_cleanup_removed_branch "$force" "$git_root" "$branch"
+  for (( i = 1; i <= count; i++ )); do
+    name="${reply_names[$i]}"
+    wt_path="${reply_paths[$i]}"
+    branch=$(git -C "$wt_path" branch --show-current 2>/dev/null)
 
-  _cwt_log_success "Worktree $(_cwt_bold "$selected") removed."
+    _cwt_remove_worktree_directory "$force" "$current_root" "$wt_path" "$git_root" "$name" "$batch"
+    if [[ $? -ne 0 ]]; then
+      (( failed++ ))
+      failed_names+=("$name")
+      continue
+    fi
+
+    _cwt_cleanup_removed_branch "$force" "$git_root" "$branch" "$batch"
+    (( succeeded++ ))
+  done
+
+  if (( count == 1 )); then
+    if (( succeeded == 1 )); then
+      _cwt_log_success "Worktree $(_cwt_bold "$name") removed."
+    fi
+  else
+    (( succeeded > 0 )) && _cwt_log_success "Removed $succeeded worktree(s)."
+    if (( failed > 0 )); then
+      _cwt_log_warn "Failed to remove $failed worktree(s): ${failed_names[*]}"
+    fi
+  fi
+
+  (( failed > 0 && succeeded == 0 )) && return 1
+  return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
