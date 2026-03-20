@@ -246,15 +246,17 @@ cwt cd fix-auth --assistant claude --all-permissions
 - `--yolo`: shortcut for `--assistant codex --all-permissions`
 - `--dangerously-skip-permissions`: shortcut for `--assistant claude --all-permissions`
 
-### Remove a worktree
+### Remove worktrees
 
 ```sh
-cwt rm fix-auth        # confirm before removing
-cwt rm -f fix-auth     # skip confirmation
-cwt rm                 # interactive selection
+cwt rm fix-auth              # confirm before removing
+cwt rm -f fix-auth           # skip confirmation
+cwt rm fix-auth refactor     # remove multiple at once
+cwt rm                       # interactive multi-selection
 ```
 
 Removes the worktree directory and its associated branch.
+Multiple names can be passed in a single command. When no name is given and fzf is available, an interactive multi-select picker appears.
 If you pass a specific name and no worktrees exist, `cwt rm <name>` returns an error.
 
 ### Update cwt

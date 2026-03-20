@@ -249,12 +249,14 @@ cwt cd fix-auth --assistant claude --all-permissions
 ### worktree 제거
 
 ```sh
-cwt rm fix-auth        # 제거 전 확인
-cwt rm -f fix-auth     # 확인 건너뛰기
-cwt rm                 # 대화형 선택
+cwt rm fix-auth              # 제거 전 확인
+cwt rm -f fix-auth           # 확인 건너뛰기
+cwt rm fix-auth refactor     # 여러 개 한 번에 제거
+cwt rm                       # 대화형 다중 선택
 ```
 
 worktree 디렉토리와 연결된 브랜치를 제거합니다.
+하나의 명령에 여러 이름을 전달할 수 있습니다. 이름 없이 실행하고 fzf가 설치되어 있으면 다중 선택 picker가 나타납니다.
 특정 이름을 전달했는데 worktree가 없으면 `cwt rm <name>`은 오류를 반환합니다.
 
 ### cwt 업데이트
