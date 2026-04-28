@@ -1855,15 +1855,14 @@ _cwt_ensure_default_worktree_ignored() {
   local worktrees_dir="${2:-$_cwt_worktrees_dir}"
   [[ "$worktrees_dir" != "${git_root}/.worktrees" ]] && return 0
 
-  local gitignore_path="${git_root}/.gitignore"
   local ignore_entry=".worktrees/"
 
-  if [[ -f "$gitignore_path" ]] && grep -Eq '^[[:space:]]*\.worktrees/?[[:space:]]*$' "$gitignore_path"; then
+  if git -C "$git_root" check-ignore -q "$ignore_entry" 2>/dev/null; then
     return 0
   fi
 
-  _cwt_log_warn "Default worktree root requires $(_cwt_bold "$ignore_entry") in $(_cwt_bold '.gitignore')."
-  _cwt_log_error "Refusing to edit $(_cwt_bold '.gitignore') automatically. Add $(_cwt_bold "$ignore_entry") manually and rerun."
+  _cwt_log_warn "Default worktree root requires $(_cwt_bold "$ignore_entry") to be gitignored (local, global, or info/exclude)."
+  _cwt_log_error "Add $(_cwt_bold "$ignore_entry") to your gitignore and rerun."
   return 1
 }
 

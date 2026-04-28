@@ -58,10 +58,26 @@ teardown() {
     cwt new --no-launch ignore-check HEAD
   "
 	[ "$status" -eq 1 ]
-	[[ "$output" == *"Default worktree root requires .worktrees/ in .gitignore."* ]]
-	[[ "$output" == *"Refusing to edit .gitignore automatically."* ]]
+	[[ "$output" == *"Default worktree root requires .worktrees/ to be gitignored"* ]]
+	[[ "$output" == *"Add .worktrees/ to your gitignore and rerun."* ]]
 	[ ! -f "$REPO_DIR/.gitignore" ]
 	[ ! -d "$REPO_DIR/.worktrees/ignore-check" ]
+}
+
+@test "cwt new: accepts .worktrees/ ignored via .git/info/exclude" {
+	rm -f "$REPO_DIR/.gitignore"
+	mkdir -p "$REPO_DIR/.git/info"
+	printf ".worktrees/\n" >>"$REPO_DIR/.git/info/exclude"
+
+	run zsh -c "
+    export NO_COLOR=1
+    cd '$REPO_DIR'
+    source '$CWT_SH'
+    cwt new --no-launch info-exclude HEAD
+  "
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Worktree created"* ]] || [[ "$output" == *"Worktree ready"* ]]
+	[ -d "$REPO_DIR/.worktrees/info-exclude" ]
 }
 
 @test "cwt new: first-run wizard can save the default worktree root" {
